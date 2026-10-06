@@ -15,6 +15,7 @@ NOTE_ALIASES: dict[str, str] = {
     "patchouli leaf": "patchouli",
     "oud": "agarwood (oud)",
     "agarwood": "agarwood (oud)",
+    "baie rose": "pink pepper",  # French for pink pepper, not a rose
 }
 
 

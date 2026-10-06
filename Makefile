@@ -1,6 +1,6 @@
 PY := backend/.venv/bin/python
 
-.PHONY: setup data process backend frontend test lint
+.PHONY: setup data process features clones backend frontend test lint
 
 setup:
 	python3 -m venv backend/.venv
@@ -12,6 +12,12 @@ data:
 
 process:
 	cd backend && ../$(PY) -m pipeline.clean && ../$(PY) -m pipeline.validate
+
+features:
+	cd backend && ../$(PY) -m pipeline.features
+
+clones:
+	cd backend && ../$(PY) -m pipeline.clones
 
 backend:
 	cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000
