@@ -15,3 +15,27 @@ Enter at least 5 fragrances you own and get carousels of recommendations: For Yo
 
 ## Data
 [Fragrantica Perfumes](https://www.kaggle.com/datasets/ledecanteur/fragrantica-perfumes) by Le Decanteur, CC BY-NC-SA 4.0.
+
+## Current development status
+
+The offline data pipeline, feature vectors, clone exclusions, core recommendation
+engine, and category builders are implemented. The frontend is a placeholder;
+search/recommendation API routes, accounts, pricing, and deployment remain planned.
+
+After placing `perfumes.csv` and `perfumes.jsonl` in `data/raw/`, run
+`make process`, `make features`, and `make clones`. Run `make test` for backend
+checks and `make evaluate` for the community-similarity benchmark.
+
+`app.engine.categories.recommend_rows(catalog, owned_ids, filters)` requires five
+distinct owned fragrances. It returns For You, Spring/Summer, Fall/Winter,
+Long-Lasting, Hidden Gems, Something Different, two accord rows, and a
+Because You Own row. Empty rows are valid when filters leave no matches.
+Budget recommendations await verified retail prices. Clones are hidden by
+default; enabling them never re-enables recorded originals of owned dupes.
+
+A seed-0 sample (200 singles requested, 166 with eligible targets; 60 collections)
+measured top-20 hit rates of 25.9% / 28.3% for the blended engine, versus
+3.0% / 8.3% for popularity and 0% / 5.0% for random popular. Similarity-only
+scoring reached 35.5% / 36.7%. These are development diagnostics rather than
+held-out proof: community votes also inform the clone exclusions, and collections
+are synthetic. Ranking weights remain provisional.
