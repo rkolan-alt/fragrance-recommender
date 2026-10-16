@@ -69,7 +69,7 @@ def clean(raw: pd.DataFrame) -> pd.DataFrame:
     flat = df["notes_flat"].map(lambda v: to_records(parse_weighted(v, NOTE_ALIASES)))
     no_pyramid = df[NOTE_TIERS].map(len).sum(axis=1) == 0
     df.loc[no_pyramid, "notes_middle"] = flat[no_pyramid]
-    df = df.drop(columns=["notes_flat", *LONGEVITY_BUCKETS])
+    df = df.drop(columns=["notes_flat"])
 
     df["year"] = df["year"].astype("Int64")
     df["in_pool"] = (
