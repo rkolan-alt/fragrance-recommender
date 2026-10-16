@@ -114,3 +114,32 @@ CLONE_MIN_UP_VOTES = 20
 CLONE_MIN_AGREEMENT = 0.6
 # Without known release years, the original must have this many times the votes.
 CLONE_ORIGINAL_VOTE_RATIO = 2
+
+# --- Recommendation ranking ------------------------------------------------
+# score = Σ weight × term; similarity is in [0, 1], quality and popularity are
+# percentiles within the candidate pool.
+SCORE_WEIGHTS: dict[str, float] = {"similarity": 0.60, "quality": 0.25, "popularity": 0.15}
+
+# Taste clusters: k = min(MAX_CLUSTERS, owned // PERFUMES_PER_CLUSTER); k < 2 → centroid only.
+MAX_CLUSTERS = 3
+PERFUMES_PER_CLUSTER = 3
+
+# Only the top-scoring candidates go through flanker collapsing and MMR.
+SHORTLIST_SIZE = 200
+# At most this many perfumes from one line (e.g. Sauvage, Sauvage Elixir) per row.
+MAX_PER_LINE = 2
+# MMR trade-off: 1 = pure score, lower = more variety within a row.
+MMR_LAMBDA = 0.8
+# How many shared accords / notes to show in a recommendation's "why".
+EXPLAIN_TOP = 3
+
+# Trailing words that mark a flanker or concentration rather than a new line,
+# e.g. "Sauvage Eau de Parfum" → "sauvage". Accent-free, lowercase.
+LINE_SUFFIXES = {
+    "parfum", "eau de parfum", "eau de toilette", "eau de cologne", "edp", "edt",
+    "extrait", "extrait de parfum", "le parfum", "parfum intense", "elixir", "intense",
+    "l'intense", "absolu", "absolute", "profumo", "cologne", "sport", "edition",
+    "limited edition", "collector", "collector edition", "pour homme", "pour femme",
+    "homme", "femme", "for men", "for women", "for him", "for her", "eau fraiche",
+    "concentree", "eau extreme", "extreme", "essence de parfum", "oil", "all-over spray",
+}  # fmt: skip

@@ -1,6 +1,6 @@
 PY := backend/.venv/bin/python
 
-.PHONY: setup data process features clones backend frontend test lint
+.PHONY: setup data process features clones evaluate backend frontend test lint
 
 setup:
 	python3 -m venv backend/.venv
@@ -31,3 +31,6 @@ test:
 lint:
 	cd backend && .venv/bin/ruff check . && .venv/bin/ruff format --check .
 	cd frontend && npm run lint
+
+evaluate:
+	cd backend && ../$(PY) -m pipeline.evaluate
