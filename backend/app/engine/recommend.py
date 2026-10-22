@@ -46,6 +46,7 @@ class Filters:
 class Profile:
     rows: np.ndarray  # owned perfume rows
     centers: np.ndarray  # (centers × features); row 0 is the centroid, then clusters
+    negative: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -93,21 +94,40 @@ def _unit_blocks(vector: np.ndarray, catalog: Catalog) -> np.ndarray:
     return out
 
 
-def build_profile(catalog: Catalog, rows: np.ndarray) -> Profile:
+def build_profile(
+    catalog: Catalog,
+    rows: np.ndarray,
+    ratings: dict[int, int] | None = None,
+    disliked_ids: tuple[int, ...] = (),
+) -> Profile:
     """Centroid of the owned perfumes plus up to MAX_CLUSTERS taste clusters,
     so a half-aquatic, half-gourmand collection isn't averaged into nothing."""
     owned = catalog.matrix[rows].toarray()
-    centers = [owned.mean(axis=0)]
+    ratings = ratings or {}
+    weights = np.array(
+        [0.5 + (ratings.get(int(catalog.perfumes.at[r, "id"]), 3) - 1) / 4 for r in rows]
+    )
+    centers = [np.average(owned, axis=0, weights=weights)]
     k = min(config.MAX_CLUSTERS, len(rows) // config.PERFUMES_PER_CLUSTER)
     if k >= 2:
-        kmeans = KMeans(n_clusters=k, n_init=10, random_state=0).fit(owned)
+        kmeans = KMeans(n_clusters=k, n_init=10, random_state=0).fit(owned, sample_weight=weights)
         centers.extend(kmeans.cluster_centers_)
-    return Profile(rows=rows, centers=np.vstack([_unit_blocks(c, catalog) for c in centers]))
+    negative = None
+    if disliked_ids:
+        negative = _unit_blocks(
+            catalog.matrix[catalog.rows(list(disliked_ids))].toarray().mean(axis=0), catalog
+        )
+    return Profile(
+        rows=rows, centers=np.vstack([_unit_blocks(c, catalog) for c in centers]), negative=negative
+    )
 
 
 def similarity(catalog: Catalog, profile: Profile) -> np.ndarray:
     """Per perfume: similarity to the closest profile center, in [0, 1]."""
-    return np.asarray(catalog.matrix @ profile.centers.T).max(axis=1)
+    scores = np.asarray(catalog.matrix @ profile.centers.T).max(axis=1)
+    if profile.negative is not None:
+        scores -= 0.3 * np.asarray(catalog.matrix @ profile.negative).ravel()
+    return np.clip(scores, 0, 1)
 
 
 # --- Candidates ----------------------------------------------------------------

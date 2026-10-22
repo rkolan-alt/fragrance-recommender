@@ -171,3 +171,28 @@ def test_reweighted_catalog_changes_block_importance() -> None:
     # Gender is the only difference, so similarity loses exactly the gender weight.
     assert male_female(catalog) == pytest.approx(1 - config.BLOCK_WEIGHTS["gender"], abs=1e-5)
     assert male_female(reweighted) == pytest.approx(1 - 0.3, abs=1e-5)
+
+
+def test_personal_ratings_weight_the_collection_profile():
+    import numpy as np
+
+    catalog = make_catalog(
+        perfume(1, CITRUS), perfume(2, GOURMAND), perfume(3, CITRUS), perfume(4, GOURMAND)
+    )
+    owned = catalog.rows([1, 2])
+    citrus_favored = similarity(catalog, build_profile(catalog, owned, {1: 5, 2: 1}))
+    gourmand_favored = similarity(catalog, build_profile(catalog, owned, {1: 1, 2: 5}))
+    assert citrus_favored[catalog.row_of[3]] > gourmand_favored[catalog.row_of[3]]
+    assert np.all(np.isfinite(citrus_favored))
+
+
+def test_disliked_centroid_reduces_similar_candidates():
+    catalog = make_catalog(
+        perfume(1, CITRUS), perfume(2, GOURMAND), perfume(3, CITRUS), perfume(4, GOURMAND)
+    )
+    owned = catalog.rows([1, 2])
+    baseline = similarity(catalog, build_profile(catalog, owned))
+    adjusted = similarity(catalog, build_profile(catalog, owned, disliked_ids=(3,)))
+    assert baseline[catalog.row_of[3]] - adjusted[catalog.row_of[3]] > (
+        baseline[catalog.row_of[4]] - adjusted[catalog.row_of[4]]
+    )

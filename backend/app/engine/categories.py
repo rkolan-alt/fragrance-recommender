@@ -16,13 +16,26 @@ class CategoryRow:
 
 
 def recommend_rows(
-    catalog: Catalog, owned_ids: list[int], filters: Filters | None = None, limit: int = 20
+    catalog: Catalog,
+    owned_ids: list[int],
+    filters: Filters | None = None,
+    limit: int = 20,
+    *,
+    ratings: dict[int, int] | None = None,
+    disliked_ids: tuple[int, ...] = (),
+    excluded_ids: tuple[int, ...] = (),
 ) -> list[CategoryRow]:
     owned = catalog.rows(list(dict.fromkeys(owned_ids)))
     if len(owned) < 5:
         raise ValueError("add at least five distinct owned fragrances")
     base = candidate_mask(catalog, owned, filters or Filters())
-    profile = build_profile(catalog, owned)
+    if excluded_ids:
+        base[catalog.rows(list(excluded_ids))] = False
+
+    def profile_for(seeds):
+        return build_profile(catalog, seeds, ratings, disliked_ids)
+
+    profile = profile_for(owned)
     sims = similarity(catalog, profile)
     p = catalog.perfumes
     rows = []
@@ -41,7 +54,7 @@ def recommend_rows(
     ):
         seasonal = p[column].to_numpy() >= 0.55
         seeds = owned[seasonal[owned]]
-        local = build_profile(catalog, seeds) if len(seeds) >= 2 else profile
+        local = profile_for(seeds) if len(seeds) >= 2 else profile
         add(key, title, seasonal, local, similarity(catalog, local))
     add(
         "long_lasting",
@@ -77,8 +90,10 @@ def recommend_rows(
                 accords[:, index].toarray().ravel() > 0,
             )
     # Pick the collection's most popular fragrance until personal ratings exist.
-    seed = owned[np.argmax(p.vote_count.to_numpy()[owned])]
-    local = build_profile(catalog, np.array([seed]))
+    seed = max(
+        owned, key=lambda r: ((ratings or {}).get(int(p.at[r, "id"]), 3), p.at[r, "vote_count"])
+    )
+    local = profile_for(np.array([seed]))
     add(
         "because_you_own",
         f"Because You Own {p.at[seed, 'name']}",

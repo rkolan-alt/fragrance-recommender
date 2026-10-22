@@ -6,11 +6,16 @@ from functools import lru_cache
 from typing import Literal
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from rapidfuzz import fuzz, process
+from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 
+from app.auth.users import optional_user
 from app.config import settings
+from app.db.models import CollectionItem, Feedback, SavedFilter
+from app.db.session import get_session
 from app.engine.catalog import load_catalog
 from app.engine.categories import recommend_rows
 from app.engine.recommend import Filters
@@ -63,8 +68,8 @@ class FilterRequest(BaseModel):
 
 class RecommendRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    owned_ids: list[int] = Field(min_length=5, max_length=500)
-    filters: FilterRequest = Field(default_factory=FilterRequest)
+    owned_ids: list[int] | None = Field(default=None, min_length=5, max_length=500)
+    filters: FilterRequest | None = None
     categories: list[str] | None = Field(default=None, max_length=20)
     limit: int = Field(default=20, ge=1, le=50)
 
@@ -100,12 +105,90 @@ def cached_recommend(owned: tuple[int, ...], filters: FilterRequest, limit: int)
     return recommend_rows(get_catalog(), list(owned), Filters(**filters.model_dump()), limit)
 
 
+@lru_cache(maxsize=128)
+def cached_account_recommend(
+    user_id: str, state: tuple, hidden: tuple[int, ...], filters: FilterRequest, limit: int
+):
+    owned = [pid for pid, status, _ in state if status == "owned"]
+    ratings = {
+        pid: rating for pid, status, rating in state if status == "owned" and rating is not None
+    }
+    disliked = tuple(pid for pid, status, _ in state if status == "disliked")
+    excluded = tuple(sorted(set(hidden) | {pid for pid, status, _ in state if status != "owned"}))
+    return recommend_rows(
+        get_catalog(),
+        owned,
+        Filters(**filters.model_dump()),
+        limit,
+        ratings=ratings,
+        disliked_ids=disliked,
+        excluded_ids=excluded,
+    )
+
+
 @router.post("/recommend")
-def recommendations(body: RecommendRequest):
-    if len(set(body.owned_ids)) < 5:
-        raise HTTPException(422, "Add at least five distinct owned fragrances")
+async def recommendations(
+    body: RecommendRequest,
+    user=Depends(optional_user),  # noqa: B008
+    session=Depends(get_session),  # noqa: B008
+):  # noqa: B008
     try:
-        rows = cached_recommend(tuple(sorted(set(body.owned_ids))), body.filters, body.limit)
+        if user is None:
+            if body.owned_ids is None or len(set(body.owned_ids)) < 5:
+                raise HTTPException(422, "Add at least five distinct owned fragrances")
+            rows = await run_in_threadpool(
+                cached_recommend,
+                tuple(sorted(set(body.owned_ids))),
+                body.filters or FilterRequest(),
+                body.limit,
+            )
+        else:
+            if body.owned_ids is not None:
+                raise HTTPException(422, "Signed-in recommendations use your saved collection")
+            items = list(
+                await session.scalars(
+                    select(CollectionItem).where(CollectionItem.user_id == user.id)
+                )
+            )
+            state = tuple(sorted((i.perfume_id, i.status, i.personal_rating) for i in items))
+            hidden = tuple(
+                sorted(
+                    await session.scalars(
+                        select(Feedback.perfume_id).where(
+                            Feedback.user_id == user.id, Feedback.action == "not_interested"
+                        )
+                    )
+                )
+            )
+            saved = list(
+                await session.scalars(
+                    select(SavedFilter)
+                    .where(SavedFilter.user_id == user.id)
+                    .order_by(SavedFilter.name)
+                )
+            )
+            default = next((f.filter_json for f in saved if f.is_default), {})
+            filters = body.filters or FilterRequest.model_validate(default)
+            rows = list(
+                await run_in_threadpool(
+                    cached_account_recommend, str(user.id), state, hidden, filters, body.limit
+                )
+            )
+            from app.engine.categories import CategoryRow
+
+            for custom in saved:
+                if custom.is_custom_row:
+                    custom_rows = await run_in_threadpool(
+                        cached_account_recommend,
+                        str(user.id),
+                        state,
+                        hidden,
+                        FilterRequest.model_validate(custom.filter_json),
+                        body.limit,
+                    )
+                    rows.append(
+                        CategoryRow(f"custom_{custom.id}", custom.name, custom_rows[0].items)
+                    )
     except (KeyError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
     if body.categories is not None:

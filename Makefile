@@ -1,6 +1,6 @@
 PY := backend/.venv/bin/python
 
-.PHONY: setup data process features clones evaluate backend frontend test lint
+.PHONY: setup data process features clones evaluate migrate backend frontend test lint
 
 setup:
 	python3 -m venv backend/.venv
@@ -20,7 +20,7 @@ clones:
 	cd backend && ../$(PY) -m pipeline.clones
 
 backend:
-	cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000
+	cd backend && .venv/bin/uvicorn app.main:app --reload --port 8001
 
 frontend:
 	cd frontend && npm run dev
@@ -34,3 +34,6 @@ lint:
 
 evaluate:
 	cd backend && ../$(PY) -m pipeline.evaluate
+
+migrate:
+	cd backend && .venv/bin/alembic upgrade head
