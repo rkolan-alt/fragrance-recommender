@@ -154,6 +154,16 @@ def search(
     ]
 
 
+@router.get("/filter-options")
+def filter_options():
+    catalog = get_catalog()
+    return {
+        "accords": sorted(catalog.accords),
+        "notes": sorted(catalog.notes),
+        "brands": sorted(catalog.perfumes.brand.dropna().unique().tolist()),
+    }
+
+
 @lru_cache(maxsize=128)
 def cached_recommend(owned: tuple[int, ...], filters: FilterRequest, limit: int, prices=()):
     return recommend_rows(
@@ -169,6 +179,7 @@ def cached_account_recommend(
     filters: FilterRequest,
     limit: int,
     prices=(),
+    additional_filters: FilterRequest | None = None,
 ):
     owned = [pid for pid, status, _ in state if status == "owned"]
     ratings = {
@@ -185,6 +196,9 @@ def cached_account_recommend(
         disliked_ids=disliked,
         excluded_ids=excluded,
         prices=prices,
+        additional_filters=Filters(**additional_filters.model_dump())
+        if additional_filters
+        else None,
     )
 
 
@@ -267,17 +281,31 @@ async def recommendations(
 
             for custom in saved:
                 if custom.is_custom_row:
-                    row_filters[f"custom_{custom.id}"] = FilterRequest.model_validate(
-                        custom.filter_json
+                    custom_filter = FilterRequest.model_validate(custom.filter_json)
+                    minimums = [
+                        v for v in (filters.price_min, custom_filter.price_min) if v is not None
+                    ]
+                    maximums = [
+                        v for v in (filters.price_max, custom_filter.price_max) if v is not None
+                    ]
+                    row_filters[f"custom_{custom.id}"] = custom_filter.model_copy(
+                        update={
+                            "price_min": max(minimums) if minimums else None,
+                            "price_max": min(maximums) if maximums else None,
+                            "store": "amazon"
+                            if "amazon" in (filters.store, custom_filter.store)
+                            else "any",
+                        }
                     )
                     custom_rows = await run_in_threadpool(
                         cached_account_recommend,
                         str(user.id),
                         state,
                         hidden,
-                        FilterRequest.model_validate(custom.filter_json),
+                        filters,
                         body.limit,
                         prices,
+                        custom_filter,
                     )
                     rows.append(
                         CategoryRow(f"custom_{custom.id}", custom.name, custom_rows[0].items)

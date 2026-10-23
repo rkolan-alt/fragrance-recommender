@@ -10,6 +10,8 @@ import type {
 import { useAccountCollection } from "@/lib/account";
 import { accountRequest } from "@/lib/account-client";
 import { AccountControls } from "./account-controls";
+import { FilterPanel } from "./filter-panel";
+import { useFilters, filterChips, DEFAULT_FILTERS } from "@/lib/filters";
 import { request } from "@/lib/client";
 import { FragranceSearch } from "./fragrance-search";
 import { DetailDialog, RecommendationCarousel } from "./recommendations";
@@ -19,6 +21,10 @@ const EXAMPLE = [31861, 9099, 9828, 5521, 33519];
 export default function FragranceApp() {
   const account = useAccountCollection();
   const { collection, update, warning } = account;
+  const preferences = useFilters(account.user?.id || null, account.ready);
+  const { filters, setFilters } = preferences;
+  const activeFilters = filterChips(filters);
+  const [hasDiscovered, setHasDiscovered] = useState(false);
   const [result, setResult] = useState<{
     key: string;
     rows: RecommendationRow[];
@@ -26,14 +32,16 @@ export default function FragranceApp() {
   const [loading, setLoading] = useState(false);
   const [exampleLoading, setExampleLoading] = useState(false);
   const [error, setError] = useState("");
-  const [includeClones, setIncludeClones] = useState(false);
+  const includeClones = filters.include_clones;
   const [detail, setDetail] = useState<Recommendation | null>(null);
   const pending = useRef<AbortController | null>(null);
   const resultArea = useRef<HTMLDivElement>(null);
   const collectionKey = `${account.user?.id || "guest"}:${account.items.map((i) => `${i.perfume_id}:${i.status}:${i.personal_rating}`).join(";")}:${collection
     .map((item) => item.id)
     .sort((a, b) => a - b)
-    .join(",")}:${includeClones}`;
+    .join(
+      ",",
+    )}:${JSON.stringify(filters)}:${JSON.stringify(preferences.saved)}`;
   const currentKey = useRef(collectionKey);
   useEffect(() => {
     currentKey.current = collectionKey;
@@ -75,8 +83,9 @@ export default function FragranceApp() {
       setExampleLoading(false);
     }
   }
-  async function discover() {
-    if (collection.length < 5) return;
+  async function discover(scroll = true) {
+    if (collection.length < 5 || !preferences.ready) return;
+    setHasDiscovered(true);
     pending.current?.abort();
     const controller = new AbortController();
     pending.current = controller;
@@ -97,21 +106,22 @@ export default function FragranceApp() {
           ...(account.user
             ? {}
             : { owned_ids: collection.map((item) => item.id) }),
-          filters: { include_clones: includeClones },
+          filters,
           limit: 12,
         }),
       });
       if (!controller.signal.aborted && currentKey.current === key) {
         setResult({ key, rows: data.rows });
-        requestAnimationFrame(() =>
-          resultArea.current?.scrollIntoView({
-            behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
-              .matches
-              ? "instant"
-              : "smooth",
-            block: "start",
-          }),
-        );
+        if (scroll)
+          requestAnimationFrame(() =>
+            resultArea.current?.scrollIntoView({
+              behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+                .matches
+                ? "instant"
+                : "smooth",
+              block: "start",
+            }),
+          );
       }
     } catch (err) {
       if (!controller.signal.aborted && currentKey.current === key)
@@ -127,21 +137,29 @@ export default function FragranceApp() {
   useEffect(() => {
     if (
       account.ready &&
-      account.user &&
+      preferences.ready &&
+      (account.user || hasDiscovered || activeFilters.length > 0) &&
       !account.busy &&
       collection.length >= 5
     ) {
       let active = true;
-      queueMicrotask(() => {
-        if (active) void discover();
-      });
+      const timer = setTimeout(() => {
+        if (active) void discover(false);
+      }, 300);
       return () => {
         active = false;
+        clearTimeout(timer);
       };
     }
     // Refresh matches when the persisted collection or personal ratings change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account.ready, account.user?.id, account.busy, collectionKey]);
+  }, [
+    account.ready,
+    account.user?.id,
+    account.busy,
+    collectionKey,
+    preferences.ready,
+  ]);
   return (
     <>
       <a href="#collection" className="skip-link">
@@ -364,19 +382,23 @@ export default function FragranceApp() {
                       pending.current?.abort();
                       setLoading(false);
                       setError("");
-                      setIncludeClones(event.target.checked);
+                      setFilters({
+                        ...filters,
+                        include_clones: event.target.checked,
+                      });
                     }}
                   />
                   <span>Include clone fragrances</span>
                 </label>
                 <button
                   className="primary-button"
-                  onClick={discover}
+                  onClick={() => discover()}
                   disabled={
                     collection.length < 5 ||
                     loading ||
                     exampleLoading ||
                     !account.ready ||
+                    !preferences.ready ||
                     account.busy
                   }
                 >
@@ -458,6 +480,54 @@ export default function FragranceApp() {
             </div>
             <span className="section-tag">COLLECTION-LED DISCOVERY</span>
           </div>
+          <div className="filter-toolbar">
+            <div>
+              <p className="filter-summary">
+                {activeFilters.length
+                  ? `${activeFilters.length} filter groups active`
+                  : "A little more specific? Make these discoveries your own."}
+              </p>
+              <div className="active-filters" aria-label="Active filters">
+                {activeFilters.map((chip) => (
+                  <button
+                    key={chip.key}
+                    aria-label={`Remove filter: ${chip.label}`}
+                    onClick={() =>
+                      setFilters({
+                        ...filters,
+                        [chip.key]: DEFAULT_FILTERS[chip.key],
+                      })
+                    }
+                  >
+                    {chip.label} ×
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="filter-toolbar-actions">
+              <FilterPanel
+                filters={filters}
+                onChange={setFilters}
+                userId={account.user?.id || null}
+                saved={preferences.saved}
+                onSaved={preferences.setSaved}
+                disabled={!preferences.ready || account.busy}
+              />
+              {activeFilters.length > 0 && (
+                <button
+                  className="reset-filters"
+                  onClick={() => setFilters(DEFAULT_FILTERS)}
+                >
+                  Clear all filters
+                </button>
+              )}
+            </div>
+          </div>
+          {preferences.error && (
+            <p className="error" role="status">
+              {preferences.error}
+            </p>
+          )}
           {loading ? (
             <div className="recommendation-loading" role="status">
               <span className="spinner" /> Finding connections in your
@@ -475,6 +545,10 @@ export default function FragranceApp() {
                   row={row}
                   collection={collection}
                   showDetail={setDetail}
+                  budgetMax={Math.min(
+                    filters.budget_max,
+                    filters.price_max ?? filters.budget_max,
+                  )}
                 />
               ))}
             </>

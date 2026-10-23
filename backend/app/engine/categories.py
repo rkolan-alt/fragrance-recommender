@@ -26,12 +26,29 @@ def recommend_rows(
     disliked_ids: tuple[int, ...] = (),
     excluded_ids: tuple[int, ...] = (),
     prices: tuple = (),
+    additional_filters: Filters | None = None,
 ) -> list[CategoryRow]:
     owned = catalog.rows(list(dict.fromkeys(owned_ids)))
     if len(owned) < 5:
         raise ValueError("add at least five distinct owned fragrances")
     filters = filters or Filters()
     base = candidate_mask(catalog, owned, filters, prices)
+    if additional_filters is not None:
+        base &= candidate_mask(catalog, owned, additional_filters, prices)
+        # One offer must satisfy both price ranges; two incompatible bottle
+        # prices for the same fragrance must not pass by intersecting IDs alone.
+        from app.pricing.service import eligible
+
+        mins = [v for v in (filters.price_min, additional_filters.price_min) if v is not None]
+        maxs = [v for v in (filters.price_max, additional_filters.price_max) if v is not None]
+        if mins or maxs or "amazon" in (filters.store, additional_filters.store):
+            matching = eligible(
+                prices,
+                price_min=max(mins) if mins else None,
+                price_max=min(maxs) if maxs else None,
+                store="amazon" if "amazon" in (filters.store, additional_filters.store) else "any",
+            )
+            base &= catalog.perfumes.id.isin({o.perfume_id for o in matching}).to_numpy()
     if excluded_ids:
         base[catalog.rows(list(excluded_ids))] = False
 

@@ -18,13 +18,18 @@ const allowed: Record<string, string[]> = {
   "users/me": ["GET"],
   "me/collection": ["GET", "POST"],
   "me/collection/import": ["POST"],
+  "me/filters": ["GET", "POST"],
   recommend: ["POST"],
 };
 
 export async function accountProxy(request: Request, path: string) {
   const methods =
     allowed[path] ||
-    (/^me\/collection\/\d+$/.test(path) ? ["PATCH", "DELETE"] : []);
+    (/^me\/collection\/\d+$/.test(path)
+      ? ["PATCH", "DELETE"]
+      : /^me\/filters\/[0-9a-f-]{36}$/.test(path)
+        ? ["DELETE"]
+        : []);
   if (!methods.includes(request.method))
     return Response.json({ detail: "Not found" }, { status: 404 });
   if (request.method !== "GET") {

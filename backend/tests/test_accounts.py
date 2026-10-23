@@ -382,3 +382,26 @@ def test_public_auth_options_never_expose_credentials(account_app):
     response = TestClient(app).get("/auth/options")
     assert response.status_code == 200
     assert set(response.json()) == {"google_enabled", "frontend_origin"}
+
+
+def test_custom_rows_obey_active_filters_and_saved_filters_survive_login(account_app):
+    app, _ = account_app
+    c = client(app)
+    register(c)
+    login(c)
+    seed(c)
+    saved = c.post(
+        "/me/filters", json={"name": "My citrus row", "filter_json": {}, "is_custom_row": True}
+    ).json()
+    key = f"custom_{saved['id']}"
+    response = c.post("/recommend", json={"categories": [key]})
+    assert response.status_code == 200
+    assert response.json()["rows"][0]["items"]
+    # Active filters apply to custom rows too; saved filters cannot bypass them.
+    strict = c.post("/recommend", json={"filters": {"min_votes": 1000000}, "categories": [key]})
+    assert strict.json()["rows"][0]["items"] == []
+    c.post("/auth/logout")
+    login(c)
+    assert c.get("/me/filters").json()[0]["id"] == saved["id"]
+    assert c.delete(f"/me/filters/{saved['id']}").status_code == 204
+    assert c.get("/me/filters").json() == []

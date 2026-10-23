@@ -1559,3 +1559,242 @@ footer > span a {
     display: none;
   }
 }
+
+.filter-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 24px 0 30px;
+  padding: 22px 0;
+  border-top: 1px solid #d7dbd0;
+  border-bottom: 1px solid #d7dbd0;
+}
+.filter-summary {
+  font-size: 13px;
+  color: #62705a;
+  margin: 0 0 10px;
+}
+.filter-toolbar-actions {
+  display: grid;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.reset-filters {
+  font-size: 12px;
+  text-decoration: underline;
+}
+.active-filters,
+.selected-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.active-filters button,
+.selected-terms button {
+  border: 1px solid #c8cebd;
+  border-radius: 20px;
+  padding: 5px 10px;
+  font-size: 11px;
+  background: #edf0e5;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.filter-dialog {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  width: min(640px, 100%);
+  max-width: 100%;
+  border: 0;
+  padding: 28px;
+  overflow-y: auto;
+  background: #fafbf6;
+  color: #283523;
+  box-shadow: -15px 0 60px #18251333;
+}
+.filter-dialog::backdrop {
+  background: #24311ecc;
+  backdrop-filter: blur(3px);
+}
+.filter-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.filter-heading h2 {
+  font-family: var(--font-serif), Georgia, serif;
+  font-size: 32px;
+  line-height: 1.15;
+  margin-top: 12px;
+}
+.filter-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.filter-fields section {
+  border-top: 1px solid #d7dbd0;
+  padding: 22px 0;
+}
+.filter-fields h3 {
+  font-size: 16px;
+  margin-bottom: 16px;
+}
+.filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.filter-number,
+.term-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+.filter-grid input,
+.filter-grid select,
+.term-picker input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid #c8cebd;
+  border-radius: 4px;
+  color: #283523;
+  background: white;
+  font: inherit;
+}
+.filter-toggles {
+  border: 0;
+  padding: 0;
+  margin: 0 0 18px;
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.filter-toggles legend {
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.filter-toggles label {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  font-size: 13px;
+}
+.filter-fields input[type="checkbox"],
+.filter-fields input[type="range"] {
+  accent-color: #526843;
+}
+.season-share {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.season-share small {
+  color: #62705a;
+}
+.term-picker {
+  position: relative;
+}
+.term-options {
+  position: absolute;
+  top: 65px;
+  left: 0;
+  width: 100%;
+  z-index: 2;
+  max-height: 230px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #b6bfab;
+  border-radius: 4px;
+  box-shadow: 0 8px 20px #24311e22;
+}
+.term-options button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  font-size: 12px;
+}
+.term-options button:hover,
+.term-options button[aria-selected="true"] {
+  background: #edf0e5;
+}
+.term-options p {
+  padding: 10px;
+}
+.filter-footer {
+  position: sticky;
+  bottom: -28px;
+  margin: 12px -28px -28px;
+  padding: 18px 28px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  background: #fafbf6;
+  border-top: 1px solid #c8cebd;
+  z-index: 3;
+}
+.filter-footer .primary-button {
+  width: auto;
+  padding: 14px 25px;
+}
+.saved-filters {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+}
+.saved-filters li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-top: 1px solid #d7dbd0;
+}
+.saved-filters button {
+  font-size: 12px;
+  text-align: left;
+}
+.saved-filters small {
+  display: block;
+  font-size: 10px;
+  color: #62705a;
+  margin-top: 4px;
+}
+@media (max-width: 600px) {
+  .filter-dialog {
+    padding: 22px 18px;
+  }
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .filter-toolbar {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .filter-toolbar-actions {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+  .filter-footer {
+    bottom: -22px;
+    margin: 12px -18px -22px;
+    padding: 16px 18px;
+  }
+  .filter-heading h2 {
+    font-size: 28px;
+  }
+}

@@ -36,6 +36,24 @@ def test_search_and_details(client):
     assert client.get("/perfume/999999").status_code == 404
 
 
+def test_filter_options_come_from_the_recommendation_vocabulary(client):
+    response = client.get("/filter-options")
+    assert response.status_code == 200
+    options = response.json()
+    catalog = routes.get_catalog()
+    assert options["accords"] == sorted(catalog.accords)
+    assert options["notes"] == sorted(catalog.notes)
+    assert "Brand 1" in options["brands"]
+    response = client.post(
+        "/recommend",
+        json={
+            "owned_ids": [1, 2, 3, 4, 5],
+            "filters": {"include_accords": [options["accords"][0]]},
+        },
+    )
+    assert response.status_code == 200
+
+
 def test_recommend_and_category_selection(client):
     body = {"owned_ids": [1, 2, 3, 4, 5], "categories": ["for_you"]}
     response = client.post("/recommend", json=body)

@@ -22,7 +22,7 @@ The offline data pipeline, feature vectors, clone exclusions, recommendation API
 accounts backend, and Amazon pricing are implemented. The frontend now supports
 guest and account collections, email/password and Google sign-in, guest collection
 import, personal ratings, wishlist/disliked statuses, real recommendation carousels,
-clone inclusion, and fragrance details. Advanced filters, account settings and
+clone inclusion, fragrance details, and custom filtering. Account settings and
 public deployment are still to come.
 
 After placing `perfumes.csv` and `perfumes.jsonl` in `data/raw/`, run
@@ -353,7 +353,7 @@ card details, carousel controls, input-change invalidation, and desktop/mobile
 layouts without horizontal page overflow. Account browser checks use a separate
 temporary database: guest import, sign out/in, restored ratings and personalized
 recommendations. Google redirects and state binding use mocked provider tests.
-Advanced filtering and account settings are separate upcoming work.
+Account settings and public deployment are separate upcoming work.
 
 
 ### Bottle photos
@@ -415,3 +415,31 @@ Collection names now open detail dialogs, so a user can access an identified
 Amazon product link for an owned fragrance such as Aventus as well as a
 recommendation. This UI still does not invent a price when only a link is known.
 Run `make migrate` before starting this version to create the product-links table.
+
+
+### Custom filtering
+
+Choose **Customize filters** above the recommendation rows. The panel supports
+gender, combined season vote share, rating/vote minimums, longevity bounds,
+price bounds, a configurable Budget-row cap, required/excluded accords and notes,
+excluded brands, clone inclusion, and confirmed Amazon-price availability.
+Accord and note choices come from the engine vocabulary via `/filter-options`.
+Required scent choices all have to be present; any excluded choice rules out a
+fragrance. Notes match across the top, heart and base pyramid. Price filters
+exclude fragrances without a matched cached bottle price.
+
+Active-filter chips can be removed individually, or reset together. Applied
+filters are reflected in the URL and survive reloads. Recommendations refresh
+after a short debounce once the collection has at least five owned fragrances.
+Signed-in users can save named presets, defaults for future visits, and custom
+recommendation rows. Explicit URL filters take precedence over account defaults.
+Custom rows also respect the current global filters, including requiring one
+Amazon offer that satisfies both price ranges. Saving or removing a custom row
+refreshes the recommendations.
+
+Run `npm test` from `frontend/` (Node 22.18+ with native TypeScript support) for
+filter URL validation tests, plus `npm run lint` and `npm run build`. Backend
+tests cover vocabulary options, account isolation/persistence and intersections
+between global and custom filters. Browser checks use a temporary database and
+cover autocomplete, applying filters, URL reload persistence, and saving,
+restoring and removing a custom row.

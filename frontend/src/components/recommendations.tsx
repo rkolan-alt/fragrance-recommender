@@ -74,10 +74,12 @@ export function RecommendationCarousel({
   row,
   collection,
   showDetail,
+  budgetMax = 60,
 }: {
   row: RecommendationRow;
   collection: Perfume[];
   showDetail: (item: Recommendation) => void;
+  budgetMax?: number;
 }) {
   const [viewport, api] = useEmblaCarousel({
     align: "start",
@@ -107,7 +109,11 @@ export function RecommendationCarousel({
         <div>
           <h3 id={id}>{row.title}</h3>
           <p>
-            {descriptions[row.key] ||
+            {(row.key === "budget"
+              ? `Value finds led by Middle Eastern houses, matched to your taste. Bottles up to $${budgetMax}.`
+              : row.key.startsWith("custom_")
+                ? "Your saved criteria, refined by the active filters above."
+                : descriptions[row.key]) ||
               "Another way to explore the fragrances you love."}
           </p>
         </div>
@@ -135,8 +141,8 @@ export function RecommendationCarousel({
       {row.items.length === 0 ? (
         <div className="row-empty">
           {row.key === "budget"
-            ? "No matched bottles under $60 fit this collection yet. Other rows still have discoveries for you."
-            : "No matches in this category for your collection right now."}
+            ? `No confirmed bottles up to $${budgetMax} match this collection and these filters. Try raising the limit or clearing a filter.`
+            : "No fragrances match this category with the current collection and filters. Try removing a filter above."}
         </div>
       ) : (
         <div
