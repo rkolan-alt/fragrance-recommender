@@ -1,6 +1,8 @@
 """Public catalog and guest recommendations. Account routes arrive in milestone 6."""
 
 import json
+import re
+import unicodedata
 from dataclasses import asdict
 from functools import lru_cache
 from typing import Literal
@@ -19,6 +21,7 @@ from app.db.session import get_session
 from app.engine.catalog import load_catalog
 from app.engine.categories import recommend_rows
 from app.engine.recommend import Filters
+from app.images import get_image_url
 from app.pricing.service import due_items, load_prices, refresh_batch, summary
 
 router = APIRouter()
@@ -85,29 +88,68 @@ class RecommendRequest(BaseModel):
     limit: int = Field(default=20, ge=1, le=50)
 
 
+def normalize_search(value):
+    text = unicodedata.normalize("NFKD", value).casefold()
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = re.sub(r"['’‘`ʼ]", "", text)
+    return " ".join(re.sub(r"[^\w\s]", " ", text).split())
+
+
 @lru_cache(maxsize=1)
 def search_names():
     p = get_catalog().perfumes
-    return (p.brand + " " + p.name).str.casefold().tolist()
+    return (
+        [normalize_search(name) for name in p.name],
+        [normalize_search(f"{brand} {name}") for brand, name in zip(p.brand, p.name, strict=True)],
+    )
 
 
 @router.get("/search")
 def search(
     q: str = Query(min_length=1, max_length=200), limit: int = Query(default=10, ge=1, le=50)
 ):
-    q = q.strip().casefold()
+    q = normalize_search(q)
     if not q:
         return []
     p = get_catalog().perfumes
-    matches = process.extract(q, search_names(), scorer=fuzz.WRatio, limit=limit, score_cutoff=55)
+    names, labels = search_names()
+    # Find literal matches across the whole catalog before truncating suggestions.
+    # Fuzzy name matches also prevent long brand labels from drowning out a scent.
+    candidates = {i for i, label in enumerate(labels) if q in label}
+    for values in (names, labels):
+        candidates.update(
+            i
+            for _, _, i in process.extract(
+                q, values, scorer=fuzz.WRatio, limit=max(100, limit), score_cutoff=55
+            )
+        )
+
+    def key(i):
+        name, label = names[i], labels[i]
+        tier = (
+            0
+            if name == q
+            else 1
+            if name.startswith(q)
+            else 2
+            if q in name
+            else 3
+            if q in label
+            else 4
+        )
+        score = max(fuzz.WRatio(q, name), 0.95 * fuzz.WRatio(q, label))
+        return (tier, -score, -fuzz.ratio(q, name), -int(p.at[i, "vote_count"]), i)
+
+    matches = sorted(candidates, key=key)[:limit]
     return [
         {
             "id": int(p.at[i, "id"]),
+            "image_url": get_image_url(int(p.at[i, "id"])),
             "name": p.at[i, "name"],
             "brand": p.at[i, "brand"],
             "year": None if pd.isna(p.at[i, "year"]) else int(p.at[i, "year"]),
         }
-        for _, _, i in matches
+        for i in matches
     ]
 
 
@@ -276,7 +318,12 @@ async def recommendations(
         )
         if item.id in checking_ids and pricing["best_offer"] is None:
             pricing["price_status"] = "checking"
-        return {**metadata.get(item.id, {}), **asdict(item), **pricing}
+        return {
+            **metadata.get(item.id, {}),
+            **asdict(item),
+            "image_url": get_image_url(item.id),
+            **pricing,
+        }
 
     if settings.pricing_auto_refresh and settings.serpapi_key:
         candidates = get_catalog().perfumes
@@ -341,6 +388,7 @@ async def perfume_detail(
     result = {k: v for k, v in result.items() if k in allowed}
     prices = tuple(o for o in await load_prices(session) if o.perfume_id == perfume_id)
     meta = catalog.perfumes.loc[catalog.row_of[perfume_id]]
+    result["image_url"] = get_image_url(perfume_id)
     result.update(summary(prices, meta.brand, meta["name"]))
     if not prices and settings.pricing_auto_refresh and settings.serpapi_key:
         pending = await due_items(session, [(perfume_id, meta.brand, meta["name"])])

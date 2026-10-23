@@ -18,10 +18,12 @@ Enter at least 5 fragrances you own and get carousels of recommendations: For Yo
 
 ## Current development status
 
-The offline data pipeline, feature vectors, clone exclusions, core recommendation
-engine, and category builders are implemented. The frontend is a placeholder;
-search/recommendation API routes and account persistence are implemented; pricing,
-frontend account pages, and deployment remain planned.
+The offline data pipeline, feature vectors, clone exclusions, recommendation API,
+accounts backend, and Amazon pricing are implemented. The frontend now supports
+a guest collection builder, browser-local persistence, real recommendation
+carousels, clone inclusion, and fragrance detail dialogs. Account screens,
+account collection import, advanced filter controls, and public deployment are
+still to come.
 
 After placing `perfumes.csv` and `perfumes.jsonl` in `data/raw/`, run
 `make process`, `make features`, and `make clones`. Run `make test` for backend
@@ -281,3 +283,64 @@ Montblanc Legend EDP and 4711 Original EDC. No additional provider queries were
 used. Other brands' Legend listings remain rejected when the brand context does
 not support Montblanc. Updated report:
 `data/processed/pricing-validation/diagnostic-20261022/catalog-matching-v2/report.json`.
+
+
+## Local website — collection builder and recommendations
+
+With the data artifacts and migrations already prepared, start the backend and
+frontend in separate terminals from the project root:
+
+```sh
+make backend
+```
+
+```sh
+make frontend
+```
+
+Open [the local website](http://127.0.0.1:3000). Keep using the same origin:
+`localhost` and `127.0.0.1` have separate browser storage. Search by fragrance or
+brand, select at least five distinct bottles, then choose **Discover my matches**.
+**Try an example collection** fetches five real catalog entries to get started.
+Collections persist in this browser; nothing is saved to an account in this UI yet.
+
+Recommendation rows support swipe, arrow buttons and keyboard navigation. Cards
+show ratings, accord profiles, an explanation, and Amazon offers only when
+available. Bottle photos appear alongside fragrance names in search, your collection,
+recommendation cards and details. Select a card to open the notes, accord strengths, season votes and
+longevity. Removing a fragrance or changing clone inclusion hides results that
+no longer match the current inputs. Search prevents duplicate entries.
+
+Browser requests use same-origin `/api/search`, `/api/recommend` and
+`/api/perfumes/<id>`. These narrow guest proxies connect to the FastAPI backend
+without forwarding login cookies, so an existing backend login does not change
+guest recommendation behavior. The default upstream is `http://127.0.0.1:8001`.
+To change it, set `FRAGRANCE_API_URL` in **frontend/.env.local**, then restart Next.
+The frontend does not load the backend's root `.env` or expose its credentials.
+
+Frontend verification: `npm run lint` and `npm run build` from `frontend/`.
+The production build uses Next.js's supported webpack builder to avoid a local
+Turbopack worker-permission failure. No external font downloads are required.
+Manual browser checks cover real autocomplete, keyboard selection, duplicate
+prevention, the minimum of five, reload persistence, recommendation generation,
+card details, carousel controls, input-change invalidation, and desktop/mobile
+layouts without horizontal page overflow. Accounts and advanced filters remain
+separate upcoming work; this is the first usable guest experience.
+
+
+### Bottle photos
+
+The JSONL dataset contains `picture` and `thumbnail` URLs that are absent from the
+CSV. Run `make images` after downloading `data/raw/perfumes.jsonl` to extract
+`data/processed/images.json`. The app reads this optional, display-only sidecar;
+images are never used in similarity, ranking or clone detection. The API adds
+`image_url` to search, recommendations and fragrance details. Rebuilding the
+sidecar is detected without restarting the backend.
+
+Photos load lazily from the dataset's Fragrantica image host, with no referrer.
+Only HTTPS URLs on the expected image host/path are accepted. Missing or failed
+images display an accessible bottle placeholder. Existing saved browser
+collections resolve their image metadata using their catalog IDs. Bottle photos
+are externally hosted and may differ from current packaging or go unavailable.
+The URLs are not guessed from perfume IDs, and no external image-search service
+or additional SerpApi credits are used.
