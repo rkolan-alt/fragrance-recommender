@@ -10,25 +10,37 @@ Use project `fragrance-recommender-511822`, initially in `us-central1`.
   same-origin account/API proxies. No database/provider secrets in this service.
 - Cloud Run `fragrance-api`: FastAPI, one worker, max one instance initially,
   2 GiB memory and concurrency 4 as a starting point; measure before raising.
-- Cloud SQL PostgreSQL: persistent users, collections, filters and price cache.
+- Neon Free PostgreSQL: persistent users, collections, filters and price cache.
+  No paid Cloud SQL instance is part of this launch.
 - Secret Manager: database URL, stable session secret, rotated Google secret,
-  Resend key and optional SerpApi key. Grant access only to the backend identity.
+  optional SerpApi key. Resend is not needed for the Google-only launch.
+  Grant access only to the backend identity.
 - Artifact Registry: private, versioned backend/frontend images. The backend image
   contains only six processed catalog files, no accounts or credentials.
 - Cloud Run Job `fragrance-migrate`: same backend image and database configuration,
   runs Alembic once before the new backend revision serves traffic.
 
-Before proceeding: verify a Resend sending domain and real delivery; production
-configuration deliberately rejects the local email outbox. Google credential
+This launch uses guest access and Google sign-in on the provided HTTPS
+`run.app` address. No domain purchase or Resend setup is required. Set
+`EMAIL_PASSWORD_ENABLED=false`; password registration, login, recovery and
+verification are disabled in both API and UI. Google credential
 rotation and local sign-in were confirmed by the owner on 23 October 2026.
 Decide whether to migrate local accounts: Alembic creates the schema, not copies
-of local accounts or prices. Preserve any retained data via private backup and a
+of local accounts or prices. Existing email-only accounts must connect Google
+while email login is still enabled before moving to a Google-only environment;
+matching email addresses are never silently merged. Preserve any retained data
+via private backup and a
 separate reviewed import. Until cached offers are populated, Budget can be empty
 and fragrances may have no Amazon link. Do not upload `dev.db` with the catalog.
 
-Set a billing budget/alerts, backups and point-in-time recovery before launch.
-Budget alerts notify; they do not cap spending. Cloud SQL has ongoing costs even
-when Cloud Run scales to zero. Review the console estimate before creating it.
+The owner selected a free-tier database on 23 October 2026. Use Neon Free, not
+Cloud SQL. Neon currently includes 1 GB storage and 100 CU-hours per project per
+month; check its dashboard for current limits. It can suspend when idle and pause
+when free limits are reached. Do not upgrade to a paid plan without approval.
+Cloud Run, builds, image storage, secrets and network traffic can still incur GCP
+charges. Configure billing alerts; alerts do not cap spending. Keep app minimum
+instances at zero. Arrange private database exports and review free-plan recovery
+limits before launch; do not assume paid backup/PITR guarantees.
 
 ## 1. Local verification and image builds
 
@@ -68,31 +80,47 @@ image digest rather than a moving tag.
 Use the GCP console or reviewed infrastructure commands to:
 
 1. Confirm the project/billing account and enable Cloud Run, Cloud Build,
-   Artifact Registry, Cloud SQL Admin and Secret Manager APIs.
+   Artifact Registry and Secret Manager APIs (no Cloud SQL API required).
 2. Create a **Docker** Artifact Registry repository named `fragrance` in
    `us-central1`. Keep it private.
-3. Create a PostgreSQL Cloud SQL instance in the same region, database `fragrance`,
-   and a dedicated application database user. Enable automated backups/PITR.
-   Use Cloud Run's Cloud SQL integration, not an unrestricted authorized-network
-   rule. Record the connection name `PROJECT:REGION:INSTANCE`.
+3. In [Neon](https://console.neon.tech/), create a **Free** project named
+   `fragrance-recommender`. Choose a US region near `us-central1` if available;
+   use PostgreSQL 17 to match CI. Keep the default `neondb` database or create
+   `fragrance`. Keep managed Neon Auth disabled: this app already manages Google
+   sign-in. Use the pooled endpoint for app traffic and direct/unpooled endpoint
+   for migrations. Keep scale-to-zero enabled.
 4. Create separate service accounts `fragrance-web` and `fragrance-api`.
-   Give the API account Cloud SQL Client and Secret Manager Secret Accessor
-   **on the required individual secrets**. Use it for the migration job too.
-   The web account needs neither database nor secret access.
+   Give the API account Secret Manager Secret Accessor **on the required individual
+   secrets**; use it for the migration job too. Neither account needs Cloud SQL
+   Client. The web identity needs no database/provider secret access.
 5. Grant the build identity Artifact Registry Writer on the repository; grant
    the release operator permission to deploy and act as the runtime identities.
    Cross-project setups also need explicit image-reader grants.
 
 Create Secret Manager entries via the console; never paste values in Git or shell
 arguments. Suggested names: `fragrance-database-url`, `fragrance-auth-secret`,
-`fragrance-google-secret`, `fragrance-resend-key`, optional `fragrance-serpapi-key`.
+`fragrance-google-secret`, `fragrance-database-unpooled` for the migration job,
+optional `fragrance-serpapi-key`.
 Use a newly generated random auth secret of at least 32 characters, stable across
-revisions. Percent-encode database username/password in the URL. For asyncpg with
-the Cloud SQL Unix socket, the URL format is:
+revisions. The existing linked workspace uses `neon.ts` (Postgres only) and the
+CLI. Run `neon login` if necessary, review `neon config plan`, then `neon deploy`.
+The CLI preserves unrelated `.env` keys and writes `DATABASE_URL` (pooled),
+`DATABASE_URL_UNPOOLED` (direct), and `NEON_BRANCH`. These files are ignored.
+The original local environment/database were backed up under `deployment/local/`.
 
-```text
-postgresql+asyncpg://USER:ENCODED_PASSWORD@/fragrance?host=/cloudsql/PROJECT:REGION:INSTANCE
-```
+The backend accepts the Neon PostgreSQL URLs as supplied, normalizes the driver
+to asyncpg, and translates libpq TLS parameters into certificate/hostname-verified
+TLS. It keeps a small application connection pool and checks stale connections.
+Alembic prefers `DATABASE_URL_UNPOOLED`. Do not print these URLs: they contain
+passwords. Map the pooled URL to `fragrance-database-url` and the direct URL to
+`fragrance-database-unpooled` in Secret Manager. Map the latter only into the
+migration job as `DATABASE_URL_UNPOOLED`.
+
+Local setup has validated the schema on an expiring branch before production,
+then privately copied existing local account/collection and cached pricing data
+into the initially empty production tables in one transaction. The original
+SQLite file was left unchanged. Do not repeat that initial import into a
+nonempty destination. No account data belongs in build uploads or Git.
 
 Use numbered secret versions for releases so a rollback also restores its secret
 configuration. The examples below use version `1`; replace it when necessary.
@@ -139,8 +167,7 @@ COOKIE_SECURE: 'true'
 FRONTEND_ORIGIN: https://YOUR_WEB_HOST
 GOOGLE_OAUTH_CLIENT_ID: YOUR_EXISTING_CLIENT_ID
 GOOGLE_OAUTH_REDIRECT_URL: https://YOUR_WEB_HOST/api/account/auth/google/callback
-EMAIL_BACKEND: resend
-EMAIL_FROM: 'Fragrance Recommender <hello@YOUR_VERIFIED_DOMAIN>'
+EMAIL_PASSWORD_ENABLED: 'false'
 DATA_DIR: /data
 PRICING_AUTO_REFRESH: 'false'
 PRICING_DAILY_REQUEST_LIMIT: '10'
@@ -156,21 +183,21 @@ https://YOUR_WEB_HOST/api/account/auth/google/associate/callback
 ```
 
 Review Google Auth Platform's audience/publishing status and test-user access.
-Use the verified origin in emailed links. Do not change local `.env` to cloud
+Use this exact origin for Google callbacks. Do not change local `.env` to cloud
 values; deployment settings are separate.
 
 ## 5. Run migrations once
 
-Replace `SQL_CONNECTION_NAME`, image digest and any secret-version placeholders.
+Replace image digest and any secret-version placeholders. Use the direct Neon
+URL for migrations; there is no Cloud SQL attachment.
 Use `gcloud run jobs update` for later releases after initial creation:
 
 ```sh
 gcloud run jobs create fragrance-migrate --project="$FRAGRANCE_PROJECT" \
   --region="$FRAGRANCE_REGION" --image=API_IMAGE_DIGEST \
   --service-account="fragrance-api@$FRAGRANCE_PROJECT.iam.gserviceaccount.com" \
-  --set-cloudsql-instances=SQL_CONNECTION_NAME \
   --env-vars-file=deployment/local/api-env.yaml \
-  --set-secrets=DATABASE_URL=fragrance-database-url:1,AUTH_SECRET=fragrance-auth-secret:1,GOOGLE_OAUTH_CLIENT_SECRET=fragrance-google-secret:1,RESEND_API_KEY=fragrance-resend-key:1 \
+  --set-secrets=DATABASE_URL=fragrance-database-url:1,AUTH_SECRET=fragrance-auth-secret:1,GOOGLE_OAUTH_CLIENT_SECRET=fragrance-google-secret:1,DATABASE_URL_UNPOOLED=fragrance-database-unpooled:1 \
   --command=alembic --args=upgrade,head --tasks=1 --parallelism=1 \
   --max-retries=0 --task-timeout=300s --memory=1Gi
 gcloud run jobs execute fragrance-migrate --project="$FRAGRANCE_PROJECT" \
@@ -186,9 +213,8 @@ ownership if its unique-index migration fails. Never automatically delete users.
 gcloud run deploy fragrance-api --project="$FRAGRANCE_PROJECT" \
   --region="$FRAGRANCE_REGION" --image=API_IMAGE_DIGEST \
   --service-account="fragrance-api@$FRAGRANCE_PROJECT.iam.gserviceaccount.com" \
-  --add-cloudsql-instances=SQL_CONNECTION_NAME \
   --env-vars-file=deployment/local/api-env.yaml \
-  --set-secrets=DATABASE_URL=fragrance-database-url:1,AUTH_SECRET=fragrance-auth-secret:1,GOOGLE_OAUTH_CLIENT_SECRET=fragrance-google-secret:1,RESEND_API_KEY=fragrance-resend-key:1 \
+  --set-secrets=DATABASE_URL=fragrance-database-url:1,AUTH_SECRET=fragrance-auth-secret:1,GOOGLE_OAUTH_CLIENT_SECRET=fragrance-google-secret:1 \
   --allow-unauthenticated --port=8080 --memory=2Gi --cpu=1 \
   --min-instances=0 --max-instances=1 --concurrency=4 --timeout=60s \
   --startup-probe=httpGet.path=/health/ready,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=10,timeoutSeconds=5,failureThreshold=20
@@ -216,10 +242,12 @@ database are not bundled in either image.
 - `/health/ready` must return 200. Verify guest search, five-item collections,
   personalized rows, filters, empty states, images and mobile navigation.
 - Fresh Google sign-in, Google linking, account persistence after a new revision,
-  and email verification/reset must work on the real HTTPS origin. Use a disposable
-  account to test password changes/session revocation and deletion.
+  must work on the real HTTPS origin. Confirm email/password controls are absent
+  and direct password/email API calls are rejected. Use a disposable account for
+  deletion checks. If email/password is enabled later, first configure Resend, a
+  verified sender and its secret mapping, then test verification/reset delivery.
 - Measure cold starts, peak memory, concurrent latency, and DB connections. Check
-  database backups and restore procedure. Configure alerts for readiness failures,
+  private database export and restore procedure, and Neon free-tier quotas. Configure alerts for readiness failures,
   5xx rates, latency, memory and billing.
 - Cloud Run's platform request logs can contain OAuth query strings independently
   of application logging. Restrict log access/retention and configure a Logs Router
@@ -231,7 +259,8 @@ database are not bundled in either image.
 - Record image/secret versions and test results. Only advertise the site after
   these checks pass. GitHub CI runs checks, not production deployment.
 
-References: [Cloud Run secrets](https://docs.cloud.google.com/run/docs/configuring/services/secrets),
+References: [Neon Free limits](https://neon.com/pricing),
+[Cloud Run secrets](https://docs.cloud.google.com/run/docs/configuring/services/secrets),
 [Cloud Run migrations](https://cloud.google.com/blog/topics/developers-practitioners/running-database-migrations-cloud-run-jobs),
 [Cloud Build submit](https://docs.cloud.google.com/sdk/gcloud/reference/builds/submit),
 [upload exclusions](https://docs.cloud.google.com/sdk/gcloud/reference/topic/gcloudignore).

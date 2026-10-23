@@ -5,6 +5,7 @@ import type { User } from "@/lib/account";
 import { accountRequest } from "@/lib/account-client";
 import { parseCollection } from "@/lib/collection";
 import { AccountSettings } from "./account-settings";
+import { useAuthOptions } from "@/lib/auth-options";
 
 async function google(collection: Perfume[]) {
   const options = await accountRequest<{
@@ -13,7 +14,7 @@ async function google(collection: Perfume[]) {
   }>("auth/options");
   if (!options.google_enabled)
     throw new Error(
-      "Google sign-in is not configured yet. Use email to continue.",
+      "Google sign-in is unavailable. Please try again later or continue as a guest.",
     );
   const target = new URL(options.frontend_origin);
   if (target.origin !== window.location.origin) {
@@ -51,6 +52,8 @@ export function AccountControls({
   locked: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const { options, error: optionsError } = useAuthOptions();
+  const emailEnabled = options?.email_password_enabled === true;
   const [mode, setMode] = useState<"login" | "signup" | "forgot">("login");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -79,7 +82,7 @@ export function AccountControls({
       } catch {
         queueMicrotask(() => {
           setError(
-            "Browser storage is needed to carry your guest collection into Google sign-in. You can sign in with email on the original page instead.",
+            "Browser storage is needed to carry your guest collection into Google sign-in. Open the account site and try again.",
           );
           setOpen(true);
         });
@@ -88,7 +91,7 @@ export function AccountControls({
       window.history.replaceState(null, "", "/");
       queueMicrotask(() => {
         setError(
-          "Google sign-in couldn’t be completed. Try again, or sign in with email if you already have an account.",
+          "Google sign-in couldn’t be completed. Try again with the Google account connected to your collection.",
         );
         setOpen(true);
       });
@@ -140,6 +143,7 @@ export function AccountControls({
           </span>
           <AccountSettings
             user={user}
+            emailEnabled={emailEnabled}
             disabled={busy || locked}
             sessionChanged={refresh}
           />
@@ -150,7 +154,7 @@ export function AccountControls({
           >
             Sign out
           </button>
-          {!user.is_verified && (
+          {emailEnabled && !user.is_verified && (
             <button
               className="header-link"
               disabled={busy || locked}
@@ -215,7 +219,7 @@ export function AccountControls({
             </button>
             <p className="eyebrow">YOUR COLLECTION, WHEREVER YOU GO</p>
             <h2 id="account-title">
-              {mode === "signup"
+              {!emailEnabled ? "Save your collection." : mode === "signup"
                 ? "Make it yours."
                 : mode === "forgot"
                   ? "Reset your password."
@@ -225,89 +229,98 @@ export function AccountControls({
               Your guest collection will be added to your account when you sign
               in.
             </p>
-            {mode !== "forgot" && (
+            {(!emailEnabled || mode !== "forgot") && (
               <button
                 className="secondary-button"
-                disabled={busy}
+                disabled={busy || !options?.google_enabled}
                 onClick={() => action(() => google(collection))}
               >
                 Continue with Google
               </button>
             )}
-            <form
-              className="account-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const data = new FormData(event.currentTarget);
-                const email = String(data.get("email"));
-                const password = String(data.get("password") || "");
-                void action(async () => {
-                  if (mode === "forgot") {
-                    await accountRequest("auth/forgot-password", {
-                      method: "POST",
-                      body: JSON.stringify({ email }),
-                    });
-                    setMessage(
-                      "If an account exists, a reset link has been requested. In local development, open the message in backend/mail-outbox.",
-                    );
-                    return;
-                  }
-                  if (mode === "signup")
-                    await accountRequest("auth/register", {
-                      method: "POST",
-                      body: JSON.stringify({ email, password }),
-                    });
-                  await accountRequest("auth/login", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/x-www-form-urlencoded",
-                    },
-                    body: new URLSearchParams({
-                      username: email,
-                      password,
-                    }).toString(),
-                  });
-                  await refresh();
-                  setOpen(false);
-                });
-              }}
-            >
-              <label>
-                Email
-                <input
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  maxLength={320}
-                />
-              </label>
-              {mode !== "forgot" && (
-                <label>
-                  Password
-                  <input
-                    name="password"
-                    type="password"
-                    autoComplete={
-                      mode === "signup" ? "new-password" : "current-password"
+            {!options && <p role="status">{optionsError || "Loading sign-in options…"}</p>}
+            {!emailEnabled && options && (
+              <p className="fine-print">
+                Sign in with Google to save your collection across devices, or
+                close this window to continue as a guest. No password is needed.
+              </p>
+            )}
+            {emailEnabled && (
+              <form
+                className="account-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const data = new FormData(event.currentTarget);
+                  const email = String(data.get("email"));
+                  const password = String(data.get("password") || "");
+                  void action(async () => {
+                    if (mode === "forgot") {
+                      await accountRequest("auth/forgot-password", {
+                        method: "POST",
+                        body: JSON.stringify({ email }),
+                      });
+                      setMessage(
+                        "If an account exists, a reset link has been requested. In local development, open the message in backend/mail-outbox.",
+                      );
+                      return;
                     }
-                    minLength={mode === "signup" ? 12 : 1}
-                    maxLength={128}
+                    if (mode === "signup")
+                      await accountRequest("auth/register", {
+                        method: "POST",
+                        body: JSON.stringify({ email, password }),
+                      });
+                    await accountRequest("auth/login", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                      },
+                      body: new URLSearchParams({
+                        username: email,
+                        password,
+                      }).toString(),
+                    });
+                    await refresh();
+                    setOpen(false);
+                  });
+                }}
+              >
+                <label>
+                  Email
+                  <input
+                    name="email"
+                    type="email"
+                    autoComplete="email"
                     required
+                    maxLength={320}
                   />
-                  {mode === "signup" && <small>Use 12–128 characters.</small>}
                 </label>
-              )}
-              <button className="primary-button" disabled={busy}>
-                {busy
-                  ? "One moment…"
-                  : mode === "signup"
-                    ? "Create account"
-                    : mode === "forgot"
-                      ? "Send reset link"
-                      : "Sign in"}
-              </button>
-            </form>
+                {mode !== "forgot" && (
+                  <label>
+                    Password
+                    <input
+                      name="password"
+                      type="password"
+                      autoComplete={
+                        mode === "signup" ? "new-password" : "current-password"
+                      }
+                      minLength={mode === "signup" ? 12 : 1}
+                      maxLength={128}
+                      required
+                    />
+                    {mode === "signup" && <small>Use 12–128 characters.</small>}
+                  </label>
+                )}
+                <button className="primary-button" disabled={busy}>
+                  {busy
+                    ? "One moment…"
+                    : mode === "signup"
+                      ? "Create account"
+                      : mode === "forgot"
+                        ? "Send reset link"
+                        : "Sign in"}
+                </button>
+              </form>
+            )}
             {error && (
               <p className="error" role="alert">
                 {error}
@@ -318,30 +331,32 @@ export function AccountControls({
                 {message}
               </p>
             )}
-            <div className="account-links">
-              <button
-                disabled={busy}
-                onClick={() => {
-                  setMode(mode === "signup" ? "login" : "signup");
-                  setError("");
-                  setMessage("");
-                }}
-              >
-                {mode === "signup"
-                  ? "Already have an account? Sign in"
-                  : "Create an account"}
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => {
-                  setMode(mode === "forgot" ? "login" : "forgot");
-                  setError("");
-                  setMessage("");
-                }}
-              >
-                {mode === "forgot" ? "Back to sign in" : "Forgot password?"}
-              </button>
-            </div>
+            {emailEnabled && (
+              <div className="account-links">
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setMode(mode === "signup" ? "login" : "signup");
+                    setError("");
+                    setMessage("");
+                  }}
+                >
+                  {mode === "signup"
+                    ? "Already have an account? Sign in"
+                    : "Create an account"}
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setMode(mode === "forgot" ? "login" : "forgot");
+                    setError("");
+                    setMessage("");
+                  }}
+                >
+                  {mode === "forgot" ? "Back to sign in" : "Forgot password?"}
+                </button>
+              </div>
+            )}
           </div>
         </dialog>
       )}

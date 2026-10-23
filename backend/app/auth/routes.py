@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi_users.router.oauth import generate_state_token
 
 from app.auth.google import GoogleOpenID
+from app.auth.policy import require_email_password
 from app.auth.users import (
     SECRET,
     UserCreate,
@@ -25,13 +26,21 @@ def options():
             settings.google_oauth_client_id and settings.google_oauth_client_secret
         ),
         "frontend_origin": settings.frontend_origin,
+        "email_password_enabled": settings.email_password_enabled,
     }
 
 
-router.include_router(fastapi_users.get_register_router(UserRead, UserCreate), prefix="/auth")
-router.include_router(fastapi_users.get_auth_router(backend), prefix="/auth")
-router.include_router(fastapi_users.get_reset_password_router(), prefix="/auth")
-router.include_router(fastapi_users.get_verify_router(UserRead), prefix="/auth")
+password_router = APIRouter(dependencies=[Depends(require_email_password)])
+password_router.include_router(fastapi_users.get_register_router(UserRead, UserCreate))
+password_router.include_router(fastapi_users.get_reset_password_router())
+password_router.include_router(fastapi_users.get_verify_router(UserRead))
+login_router = fastapi_users.get_auth_router(backend)
+login_router.routes = [r for r in login_router.routes if r.path == "/login"]
+password_router.include_router(login_router)
+router.include_router(password_router, prefix="/auth")
+logout_router = fastapi_users.get_auth_router(backend)
+logout_router.routes = [r for r in logout_router.routes if r.path == "/logout"]
+router.include_router(logout_router, prefix="/auth")
 users_router = fastapi_users.get_users_router(UserRead, UserUpdate)
 # Expose only self-service routes; no public admin/user-list surface.
 users_router.routes = [r for r in users_router.routes if r.path == "/me" and "GET" in r.methods]

@@ -4,9 +4,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import settings
+from app.db.connection import connection_settings
 from app.db.models import Base
 
 # this is the Alembic Config object, which provides
@@ -23,7 +24,12 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 target_metadata = Base.metadata
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+migration_url, migration_options = connection_settings(
+    settings.database_url_unpooled or settings.database_url
+)
+config.set_main_option(
+    "sqlalchemy.url", migration_url.render_as_string(hide_password=False).replace("%", "%%")
+)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -68,9 +74,9 @@ async def run_async_migrations() -> None:
 
     """
 
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    connectable = create_async_engine(
+        migration_url,
+        connect_args=migration_options.get("connect_args", {}),
         poolclass=pool.NullPool,
     )
 

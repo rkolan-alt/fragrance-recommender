@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
+from app.auth.policy import require_email_password
 from app.auth.users import SESSION_COOKIE, UserUpdate, current_user, get_user_manager
 from app.config import settings
 from app.db.models import CollectionItem, Feedback, SavedFilter
@@ -30,7 +31,7 @@ class DeleteInput(BaseModel):
     confirmation_text: Literal["DELETE"]
 
 
-@router.post("/password", status_code=204)
+@router.post("/password", status_code=204, dependencies=[Depends(require_email_password)])
 async def change_password(
     body: PasswordInput,
     request: Request,

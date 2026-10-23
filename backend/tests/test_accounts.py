@@ -521,7 +521,7 @@ def test_public_auth_options_never_expose_credentials(account_app):
     app, _ = account_app
     response = TestClient(app).get("/auth/options")
     assert response.status_code == 200
-    assert set(response.json()) == {"google_enabled", "frontend_origin"}
+    assert set(response.json()) == {"google_enabled", "frontend_origin", "email_password_enabled"}
 
 
 def test_custom_rows_obey_active_filters_and_saved_filters_survive_login(account_app):
@@ -545,3 +545,99 @@ def test_custom_rows_obey_active_filters_and_saved_filters_survive_login(account
     assert c.get("/me/filters").json()[0]["id"] == saved["id"]
     assert c.delete(f"/me/filters/{saved['id']}").status_code == 204
     assert c.get("/me/filters").json() == []
+
+
+def test_google_only_blocks_email_operations_without_losing_existing_collection(
+    account_app, monkeypatch
+):
+    app, _ = account_app
+    c = client(app)
+    register(c)
+    login(c)
+    seed(c)
+    monkeypatch.setattr(settings, "email_password_enabled", False)
+    assert c.get("/auth/options").json()["email_password_enabled"] is False
+    for path, payload in [
+        ("/auth/register", {"email": "new@example.com", "password": PASSWORD}),
+        ("/auth/forgot-password", {"email": "first@example.com"}),
+        ("/auth/reset-password", {"token": "test", "password": PASSWORD}),
+        ("/auth/request-verify-token", {"email": "first@example.com"}),
+        ("/auth/verify", {"token": "test"}),
+        ("/me/password", {"current_password": PASSWORD, "new_password": PASSWORD}),
+    ]:
+        assert c.post(path, json=payload).status_code == 404, path
+    assert (
+        c.post(
+            "/auth/login", data={"username": "first@example.com", "password": PASSWORD}
+        ).status_code
+        == 404
+    )
+    assert len(c.get("/me/collection").json()) == 5
+    assert c.post("/auth/logout").status_code == 204
+    assert c.get("/users/me").status_code == 401
+    # Switching the policy back does not require any account/database migration.
+    monkeypatch.setattr(settings, "email_password_enabled", True)
+    login(c)
+    assert len(c.get("/me/collection").json()) == 5
+
+
+def test_google_only_signup_and_returning_login_save_collection_without_email(
+    account_app, monkeypatch
+):
+    from urllib.parse import parse_qs, urlparse
+
+    from fastapi import FastAPI
+
+    from app.api.accounts import router as accounts_router
+    from app.auth.google import GoogleOpenID
+    from app.auth.routes import google_routes
+    from app.auth.routes import router as auth_router
+    from app.auth.security import AccountSecurityMiddleware
+
+    existing_app, _ = account_app
+    monkeypatch.setattr(settings, "email_password_enabled", False)
+    monkeypatch.setattr(settings, "google_oauth_client_id", "test-client")
+    monkeypatch.setattr(settings, "google_oauth_client_secret", "test-secret")
+
+    async def token(*args, **kwargs):
+        return {"access_token": "test-provider-token", "token_type": "Bearer"}
+
+    async def identity(*args, **kwargs):
+        return "google-only-subject", "google-only@example.com"
+
+    async def unexpected_email(*args, **kwargs):
+        raise AssertionError("Google-only accounts must not send account emails")
+
+    monkeypatch.setattr(GoogleOpenID, "get_access_token", token)
+    monkeypatch.setattr(GoogleOpenID, "get_id_email", identity)
+    monkeypatch.setattr("app.auth.users.send_account_email", unexpected_email)
+    oauth_app = FastAPI()
+    oauth_app.include_router(google_routes())
+    oauth_app.include_router(auth_router)
+    oauth_app.include_router(accounts_router)
+    oauth_app.dependency_overrides.update(existing_app.dependency_overrides)
+    oauth_app.add_middleware(AccountSecurityMiddleware)
+    c = client(oauth_app)
+
+    def google_login():
+        authorize = c.get("/auth/google/authorize")
+        state = parse_qs(urlparse(authorize.json()["authorization_url"]).query)["state"][0]
+        response = c.get("/auth/google/callback", params={"code": "test-code", "state": state})
+        assert response.status_code == 204, response.text
+        user = c.get("/users/me").json()
+        assert user["is_verified"] is True
+        return user["id"]
+
+    user_id = google_login()
+    seed(c)
+    assert c.post("/auth/logout").status_code == 204
+    assert google_login() == user_id
+    assert len(c.get("/me/collection").json()) == 5
+    assert (
+        c.request(
+            "DELETE",
+            "/me",
+            json={"confirmation_email": "google-only@example.com", "confirmation_text": "DELETE"},
+        ).status_code
+        == 204
+    )

@@ -2,15 +2,21 @@
 import Link from "next/link";
 import { useState } from "react";
 import { accountRequest } from "@/lib/account-client";
+import { useAuthOptions } from "@/lib/auth-options";
 export function AccountToken({ purpose }: { purpose: "verify" | "reset" }) {
+  const { options, error: optionsError } = useAuthOptions();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
   return (
     <main className="account-token">
       <p className="eyebrow">FRAGRANCE RECOMMENDER</p>
-      <h1>{purpose === "verify" ? "Verify your email." : "A fresh start."}</h1>
-      {done ? (
+      <h1>{options && !options.email_password_enabled ? "Sign in with Google." : purpose === "verify" ? "Verify your email." : "A fresh start."}</h1>
+      {!options ? (
+        <p role="status">{optionsError || "Loading account options…"}</p>
+      ) : !options.email_password_enabled ? (
+        <p>Email/password accounts are unavailable on this site. Return to your collection and sign in with Google.</p>
+      ) : done ? (
         <p role="status">
           {purpose === "verify"
             ? "Your email is verified."

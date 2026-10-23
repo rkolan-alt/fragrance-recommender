@@ -128,3 +128,27 @@ def test_readiness_fails_safely_when_catalog_is_unavailable(monkeypatch):
     assert response.status_code == 503
     assert response.json() == {"status": "not_ready"}
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_google_only_production_requires_google_but_not_resend():
+    config = dict(
+        environment="production",
+        email_password_enabled=False,
+        cookie_secure=True,
+        auth_secret="x" * 48,
+        database_url="postgresql+asyncpg://example:example@localhost/fragrance",
+        frontend_origin="https://fragrance-web.example.run.app",
+        google_oauth_redirect_url="https://fragrance-web.example.run.app/api/account/auth/google/callback",
+        google_oauth_client_id="test-id",
+        google_oauth_client_secret="test-secret",
+        email_backend="outbox",
+        resend_api_key="",
+    )
+    assert Settings(_env_file=None, **config).email_password_enabled is False
+    with pytest.raises(ValidationError, match="Configure Google"):
+        Settings(
+            _env_file=None,
+            **{**config, "google_oauth_client_id": "", "google_oauth_client_secret": ""},
+        )
+    with pytest.raises(ValidationError, match="Resend"):
+        Settings(_env_file=None, **{**config, "email_password_enabled": True})

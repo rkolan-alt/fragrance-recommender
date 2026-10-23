@@ -468,3 +468,37 @@ and access to the migrated account database. Backend diagnostics use request IDs
 and structured status/timing logs without query strings, cookies, bodies or
 exception values. Run Uvicorn with `--no-access-log` (as in `make backend`) so its
 separate access logger does not record OAuth query parameters.
+
+### Initial cloud launch: guest access and Google sign-in
+
+Set `EMAIL_PASSWORD_ENABLED=false` in the backend deployment environment to
+launch on the Cloud Run HTTPS address without a purchased domain or Resend.
+The UI uses `/auth/options` to hide email/password registration, login, recovery,
+verification and password settings; the backend rejects those operations too.
+Google sessions, saved collections, account deletion, and guest recommendations
+remain available. Production requires both Google credentials and the matching
+HTTPS callback. Local email development remains enabled by default.
+
+No accounts are deleted or merged by this switch. Link Google to any retained
+email-only account before disabling password login or migrating it to production.
+To enable email accounts later, configure Resend and a verified sender before
+setting the flag to true. See [the GCP runbook](deployment/GCP.md).
+
+### Neon workspace setup
+
+The root `neon.ts` declares Postgres only and preserves existing Google/FastAPI
+Users authentication. `neon init` installed the Neon plugin for Codex, including
+its OAuth MCP server; reload/authorize that plugin in Codex if its tools are not
+yet available. The authenticated CLI works independently of MCP activation.
+
+Run `neon login`, review `neon config plan`, then `neon deploy` to pull the linked
+branch's pooled `DATABASE_URL` and direct `DATABASE_URL_UNPOOLED` into ignored
+`.env`. SQLAlchemy/asyncpg uses verified TLS for Neon and Alembic selects the
+direct URL. Existing local configuration/database backups remain private under
+`deployment/local/`; never commit them. Regression migration tests explicitly
+clear the direct URL so they cannot downgrade a real Neon database.
+
+From the repository root, `npm run build` builds Next.js and `npm start` serves
+the standalone output with its static assets. Run `make backend` in a separate
+terminal; restart it after changing environment variables. The frontend defaults
+to the local API on port 8001. Production still deploys separately on Cloud Run.

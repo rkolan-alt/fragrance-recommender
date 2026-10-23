@@ -7,9 +7,17 @@ import pytest
 from sqlalchemy.engine import make_url
 
 
-def test_migration_upgrade_check_and_downgrade(tmp_path):
+def test_migration_upgrade_check_and_downgrade(tmp_path, monkeypatch):
+    # A real Neon direct URL may exist in the developer's environment. Never use
+    # it for destructive upgrade/downgrade regression checks.
+    monkeypatch.setenv("DATABASE_URL_UNPOOLED", "postgresql://unused:unused@invalid.invalid/live")
     backend = Path(__file__).resolve().parents[1]
-    env = {**os.environ, "DATABASE_URL": f"sqlite+aiosqlite:///{tmp_path / 'migration.db'}"}
+    env = {
+        **os.environ,
+        "DATABASE_URL": f"sqlite+aiosqlite:///{tmp_path / 'migration.db'}",
+        "DATABASE_URL_UNPOOLED": "",
+        "ENVIRONMENT": "test",
+    }
     for command in (("upgrade", "head"), ("check",), ("downgrade", "base"), ("upgrade", "head")):
         result = subprocess.run(
             [sys.executable, "-m", "alembic", *command],
@@ -46,7 +54,12 @@ def test_postgres_migrations():
 
     asyncio.run(clear_test_database())
     backend = Path(__file__).resolve().parents[1]
-    env = {**os.environ, "DATABASE_URL": url}
+    env = {
+        **os.environ,
+        "DATABASE_URL": url,
+        "DATABASE_URL_UNPOOLED": "",
+        "ENVIRONMENT": "test",
+    }
     for command in (("upgrade", "head"), ("check",), ("downgrade", "base"), ("upgrade", "head")):
         result = subprocess.run(
             [sys.executable, "-m", "alembic", *command],

@@ -4,9 +4,11 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
+from app.db.connection import connection_settings
 from app.db.models import OAuthAccount, User
 
-engine = create_async_engine(settings.database_url)
+database_url, engine_options = connection_settings(settings.database_url)
+engine = create_async_engine(database_url, **engine_options)
 if engine.dialect.name == "sqlite":
 
     @event.listens_for(engine.sync_engine, "connect")

@@ -6,10 +6,12 @@ type Provider = { provider: string; email: string };
 
 export function AccountSettings({
   user,
+  emailEnabled,
   disabled,
   sessionChanged,
 }: {
   user: User;
+  emailEnabled: boolean;
   disabled: boolean;
   sessionChanged: () => Promise<void>;
 }) {
@@ -193,94 +195,96 @@ export function AccountSettings({
                   </>
                 )}
               </section>
-              <section>
-                <h3>Change password</h3>
-                <form
-                  className="account-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const form = e.currentTarget;
-                    const data = new FormData(form);
-                    if (data.get("new_password") !== data.get("confirmation")) {
-                      setError("The new passwords do not match.");
-                      return;
-                    }
-                    void action(async () => {
-                      await accountRequest("me/password", {
-                        method: "POST",
-                        body: JSON.stringify({
-                          current_password: data.get("current_password"),
-                          new_password: data.get("new_password"),
-                        }),
+              {emailEnabled && (
+                <section>
+                  <h3>Change password</h3>
+                  <form
+                    className="account-form"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const form = e.currentTarget;
+                      const data = new FormData(form);
+                      if (data.get("new_password") !== data.get("confirmation")) {
+                        setError("The new passwords do not match.");
+                        return;
+                      }
+                      void action(async () => {
+                        await accountRequest("me/password", {
+                          method: "POST",
+                          body: JSON.stringify({
+                            current_password: data.get("current_password"),
+                            new_password: data.get("new_password"),
+                          }),
+                        });
+                        form.reset();
+                        setOpen(false);
+                        await sessionChanged();
                       });
-                      form.reset();
-                      setOpen(false);
-                      await sessionChanged();
-                    });
-                  }}
-                >
+                    }}
+                  >
+                    <p className="fine-print">
+                      Changing your password signs out all sessions. Sign in again
+                      with your new password.
+                    </p>
+                    <label>
+                      Current password
+                      <input
+                        type="password"
+                        name="current_password"
+                        autoComplete="current-password"
+                        required
+                        maxLength={128}
+                      />
+                    </label>
+                    <label>
+                      New password
+                      <input
+                        type="password"
+                        name="new_password"
+                        autoComplete="new-password"
+                        required
+                        minLength={12}
+                        maxLength={128}
+                      />
+                      <small>Use 12–128 characters.</small>
+                    </label>
+                    <label>
+                      Confirm new password
+                      <input
+                        type="password"
+                        name="confirmation"
+                        autoComplete="new-password"
+                        required
+                        minLength={12}
+                        maxLength={128}
+                      />
+                    </label>
+                    <button className="secondary-button">
+                      Change password & sign out
+                    </button>
+                  </form>
                   <p className="fine-print">
-                    Changing your password signs out all sessions. Sign in again
-                    with your new password.
+                    If you signed up with Google or forgot your password, request
+                    a password-reset email to set one.
                   </p>
-                  <label>
-                    Current password
-                    <input
-                      type="password"
-                      name="current_password"
-                      autoComplete="current-password"
-                      required
-                      maxLength={128}
-                    />
-                  </label>
-                  <label>
-                    New password
-                    <input
-                      type="password"
-                      name="new_password"
-                      autoComplete="new-password"
-                      required
-                      minLength={12}
-                      maxLength={128}
-                    />
-                    <small>Use 12–128 characters.</small>
-                  </label>
-                  <label>
-                    Confirm new password
-                    <input
-                      type="password"
-                      name="confirmation"
-                      autoComplete="new-password"
-                      required
-                      minLength={12}
-                      maxLength={128}
-                    />
-                  </label>
-                  <button className="secondary-button">
-                    Change password & sign out
+                  <button
+                    className="settings-link"
+                    onClick={() =>
+                      action(async () => {
+                        await accountRequest("auth/forgot-password", {
+                          method: "POST",
+                          body: JSON.stringify({ email: user.email }),
+                        });
+                        setMessage(
+                          "Password reset requested. Follow the link in your email to set a new password.",
+                        );
+                      })
+                    }
+                  >
+                    Request password-reset email
                   </button>
-                </form>
-                <p className="fine-print">
-                  If you signed up with Google or forgot your password, request
-                  a password-reset email to set one.
-                </p>
-                <button
-                  className="settings-link"
-                  onClick={() =>
-                    action(async () => {
-                      await accountRequest("auth/forgot-password", {
-                        method: "POST",
-                        body: JSON.stringify({ email: user.email }),
-                      });
-                      setMessage(
-                        "Password reset requested. Follow the link in your email to set a new password.",
-                      );
-                    })
-                  }
-                >
-                  Request password-reset email
-                </button>
-              </section>
+                </section>
+              )}
               <section className="delete-account">
                 <h3>Delete account</h3>
                 <p className="fine-print">

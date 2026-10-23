@@ -54,8 +54,10 @@ never place the SQLite account database in a public catalog bucket or repository
 
 Use `production.env.example` as a reference, with real secrets stored outside Git.
 Setting `ENVIRONMENT=production` validates HTTPS, secure cookies, a stable auth
-secret, PostgreSQL/asyncpg, a configured email provider/sender, and the Google
-callback address. Invalid startup settings report requirements without printing
+secret, PostgreSQL/asyncpg and the Google callback address. The initial launch
+sets `EMAIL_PASSWORD_ENABLED=false` and requires Google credentials, without
+Resend or a purchased domain. Enabling email/password later also requires a
+configured email provider and verified sender. Invalid startup settings report requirements without printing
 input secret values.
 
 Keep the website and OAuth callback on the same public origin. The backend can
@@ -89,16 +91,18 @@ behavior still need measuring on the chosen Cloud Run instance configuration.
 ## Human steps before public launch
 
 1. Rotate the Google OAuth client secret shared earlier and replace it privately.
-2. Set up a Resend account and verify a sending domain; configure its key and
-   `EMAIL_FROM`. Email remains in the development outbox until then.
+2. Set `EMAIL_PASSWORD_ENABLED=false` for the guest/Google-only launch using
+   the provided HTTPS `run.app` address. Resend and a purchased domain are optional
+   future additions. Link Google to retained email-only accounts before switching;
+   matching email addresses are not automatically merged.
 3. Configure the production hostname, OAuth audience/test users as appropriate,
    and both redirect URIs above. Check real Google login and linking in a fresh
    browser session. Local provider tests use mocks and grant no real Google access.
-4. Send a verification email and reset email to a real inbox, follow their links,
-   and check password change, logout and account deletion using a disposable
-   production test account.
-5. Provision the selected GCP services, private artifact storage, persistent
-   database/backups, Secret Manager values, billing alerts and runtime health alerts.
+4. Check Google login, logout, persistence and deletion using a disposable
+   production test account. Verify password/email routes are disabled. If email
+   accounts are enabled later, test real verification/reset delivery then.
+5. Provision Cloud Run and a Neon Free PostgreSQL database (no paid Cloud SQL),
+   Secret Manager values, private backups, billing alerts and runtime health alerts.
    Connect GitHub deployment only after the release checks pass.
 6. Preserve dataset attribution. Confirm commercial-use permission before adding
    affiliate revenue; the dataset is licensed CC BY-NC-SA 4.0.

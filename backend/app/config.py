@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
 
     database_url: str = "sqlite+aiosqlite:///./dev.db"
+    database_url_unpooled: str = ""
     serpapi_key: str = ""
     pricing_daily_request_limit: int = 10
     pricing_lazy_per_request: int = 2
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
     google_oauth_client_secret: str = ""
     google_oauth_redirect_url: str = "http://localhost:8001/auth/google/callback"
     email_backend: str = "outbox"
+    email_password_enabled: bool = True
     resend_api_key: str = ""
     email_from: str = "Fragrance Recommender <onboarding@resend.dev>"
     mail_outbox: Path = REPO_ROOT / "backend" / "mail-outbox"
@@ -33,6 +35,13 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:3000"
     data_dir: Path = REPO_ROOT / "data"
     environment: Literal["development", "test", "production"] = "development"
+
+    @field_validator("database_url", "database_url_unpooled")
+    @classmethod
+    def normalize_database_url(cls, value):
+        from app.db.connection import async_database_url
+
+        return async_database_url(value) if value else value
 
     @model_validator(mode="after")
     def production_settings(self):
@@ -56,10 +65,16 @@ class Settings(BaseSettings):
             issues.append("AUTH_SECRET must contain at least 32 characters")
         if not self.database_url.startswith("postgresql+asyncpg://"):
             issues.append("DATABASE_URL must use PostgreSQL with asyncpg")
-        if self.email_backend != "resend" or not self.resend_api_key:
+        if self.email_password_enabled and (
+            self.email_backend != "resend" or not self.resend_api_key
+        ):
             issues.append("Configure Resend email delivery before production")
-        if "onboarding@resend.dev" in self.email_from:
+        if self.email_password_enabled and "onboarding@resend.dev" in self.email_from:
             issues.append("EMAIL_FROM must use your verified sending domain")
+        if not self.email_password_enabled and not (
+            self.google_oauth_client_id and self.google_oauth_client_secret
+        ):
+            issues.append("Configure Google sign-in when email/password is disabled")
         if bool(self.google_oauth_client_id) != bool(self.google_oauth_client_secret):
             issues.append("Configure both Google OAuth credentials or neither")
         if self.google_oauth_client_id:
