@@ -1,6 +1,6 @@
 PY := backend/.venv/bin/python
 
-.PHONY: setup data process features clones evaluate migrate backend frontend test lint
+.PHONY: setup data process features clones evaluate migrate prices validate-prices backend frontend test lint
 
 setup:
 	python3 -m venv backend/.venv
@@ -37,3 +37,9 @@ evaluate:
 
 migrate:
 	cd backend && .venv/bin/alembic upgrade head
+
+prices:
+	cd backend && .venv/bin/python -m app.pricing.refresh --top 50
+
+validate-prices:
+	cd backend && .venv/bin/python -m app.pricing.validate --live --limit 10

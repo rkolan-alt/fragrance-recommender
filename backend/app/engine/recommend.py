@@ -40,6 +40,10 @@ class Filters:
     exclude_notes: tuple[str, ...] = ()
     exclude_brands: tuple[str, ...] = ()
     include_clones: bool = False
+    price_min: float | None = None
+    price_max: float | None = None
+    store: str = "any"
+    budget_max: float = 60
 
 
 @dataclass(frozen=True)
@@ -146,7 +150,9 @@ def _has_terms(catalog: Catalog, block: str, names: tuple[str, ...]) -> np.ndarr
     return catalog.matrix[:, columns].toarray() > 0
 
 
-def candidate_mask(catalog: Catalog, owned_rows: np.ndarray, filters: Filters) -> np.ndarray:
+def candidate_mask(
+    catalog: Catalog, owned_rows: np.ndarray, filters: Filters, prices=()
+) -> np.ndarray:
     p = catalog.perfumes
     mask = p["in_pool"].to_numpy(dtype=bool, copy=True)
     mask[owned_rows] = False
@@ -183,6 +189,19 @@ def candidate_mask(catalog: Catalog, owned_rows: np.ndarray, filters: Filters) -
         mask &= ~_has_terms(catalog, "notes", filters.exclude_notes).any(axis=1)
     if filters.exclude_brands:
         mask &= ~p["brand"].isin(filters.exclude_brands).to_numpy()
+    if filters.price_min is not None or filters.price_max is not None or filters.store != "any":
+        from app.pricing.service import eligible
+
+        priced_ids = {
+            o.perfume_id
+            for o in eligible(
+                prices,
+                price_min=filters.price_min,
+                price_max=filters.price_max,
+                store=filters.store,
+            )
+        }
+        mask &= p["id"].isin(priced_ids).to_numpy()
     return mask
 
 
@@ -219,6 +238,7 @@ def rank(
     sims: np.ndarray,
     weights: dict[str, float] | None = None,
     limit: int = 20,
+    bonus: np.ndarray | None = None,
 ) -> list[Rec]:
     """Score candidates, then pick a diverse row with flanker caps and MMR."""
     w = weights or config.SCORE_WEIGHTS
@@ -229,6 +249,8 @@ def rank(
         + w["quality"] * np.nan_to_num(p["quality_pct"].to_numpy()[candidates])
         + w["popularity"] * np.nan_to_num(p["popularity"].to_numpy()[candidates])
     )
+    if bonus is not None:
+        score += bonus[candidates]
     top = np.argsort(-score, kind="stable")[: config.SHORTLIST_SIZE]
     shortlist, score = candidates[top], score[top]
     picks = _diversify(catalog, shortlist, score, limit)

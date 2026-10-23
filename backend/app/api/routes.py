@@ -6,7 +6,7 @@ from functools import lru_cache
 from typing import Literal
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from rapidfuzz import fuzz, process
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from app.db.session import get_session
 from app.engine.catalog import load_catalog
 from app.engine.categories import recommend_rows
 from app.engine.recommend import Filters
+from app.pricing.service import due_items, load_prices, refresh_batch, summary
 
 router = APIRouter()
 
@@ -54,9 +55,19 @@ class FilterRequest(BaseModel):
     exclude_notes: tuple[str, ...] = Field(default=(), max_length=100)
     exclude_brands: tuple[str, ...] = Field(default=(), max_length=100)
     include_clones: bool = False
+    price_min: float | None = Field(default=None, ge=0, le=10000, allow_inf_nan=False)
+    price_max: float | None = Field(default=None, ge=0, le=10000, allow_inf_nan=False)
+    store: Literal["any", "amazon"] = "any"
+    budget_max: float = Field(default=60, gt=0, le=10000, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def valid_range(self):
+        if (
+            self.price_min is not None
+            and self.price_max is not None
+            and self.price_min > self.price_max
+        ):
+            raise ValueError("minimum price exceeds maximum")
         if (
             self.min_longevity is not None
             and self.max_longevity is not None
@@ -101,13 +112,20 @@ def search(
 
 
 @lru_cache(maxsize=128)
-def cached_recommend(owned: tuple[int, ...], filters: FilterRequest, limit: int):
-    return recommend_rows(get_catalog(), list(owned), Filters(**filters.model_dump()), limit)
+def cached_recommend(owned: tuple[int, ...], filters: FilterRequest, limit: int, prices=()):
+    return recommend_rows(
+        get_catalog(), list(owned), Filters(**filters.model_dump()), limit, prices=prices
+    )
 
 
 @lru_cache(maxsize=128)
 def cached_account_recommend(
-    user_id: str, state: tuple, hidden: tuple[int, ...], filters: FilterRequest, limit: int
+    user_id: str,
+    state: tuple,
+    hidden: tuple[int, ...],
+    filters: FilterRequest,
+    limit: int,
+    prices=(),
 ):
     owned = [pid for pid, status, _ in state if status == "owned"]
     ratings = {
@@ -123,15 +141,20 @@ def cached_account_recommend(
         ratings=ratings,
         disliked_ids=disliked,
         excluded_ids=excluded,
+        prices=prices,
     )
 
 
 @router.post("/recommend")
 async def recommendations(
     body: RecommendRequest,
+    background_tasks: BackgroundTasks,
     user=Depends(optional_user),  # noqa: B008
     session=Depends(get_session),  # noqa: B008
 ):  # noqa: B008
+    prices = await load_prices(session)
+    response_filters = body.filters or FilterRequest()
+    row_filters = {}
     try:
         if user is None:
             if body.owned_ids is None or len(set(body.owned_ids)) < 5:
@@ -141,6 +164,7 @@ async def recommendations(
                 tuple(sorted(set(body.owned_ids))),
                 body.filters or FilterRequest(),
                 body.limit,
+                prices,
             )
         else:
             if body.owned_ids is not None:
@@ -169,15 +193,25 @@ async def recommendations(
             )
             default = next((f.filter_json for f in saved if f.is_default), {})
             filters = body.filters or FilterRequest.model_validate(default)
+            response_filters = filters
             rows = list(
                 await run_in_threadpool(
-                    cached_account_recommend, str(user.id), state, hidden, filters, body.limit
+                    cached_account_recommend,
+                    str(user.id),
+                    state,
+                    hidden,
+                    filters,
+                    body.limit,
+                    prices,
                 )
             )
             from app.engine.categories import CategoryRow
 
             for custom in saved:
                 if custom.is_custom_row:
+                    row_filters[f"custom_{custom.id}"] = FilterRequest.model_validate(
+                        custom.filter_json
+                    )
                     custom_rows = await run_in_threadpool(
                         cached_account_recommend,
                         str(user.id),
@@ -185,6 +219,7 @@ async def recommendations(
                         hidden,
                         FilterRequest.model_validate(custom.filter_json),
                         body.limit,
+                        prices,
                     )
                     rows.append(
                         CategoryRow(f"custom_{custom.id}", custom.name, custom_rows[0].items)
@@ -216,13 +251,54 @@ async def recommendations(
     ]
     records = json.loads(details.loc[details.id.isin(ids), columns].to_json(orient="records"))
     metadata = {record["id"]: record for record in records}
+    by_id = {}
+    for offer in prices:
+        by_id.setdefault(offer.perfume_id, []).append(offer)
+
+    checking_ids = set()
+
+    def priced_card(item, key):
+        active_filters = row_filters.get(key, response_filters)
+        cap = active_filters.price_max
+        if key == "budget":
+            cap = (
+                min(cap, active_filters.budget_max)
+                if cap is not None
+                else active_filters.budget_max
+            )
+        pricing = summary(
+            by_id.get(item.id, ()),
+            item.brand,
+            item.name,
+            price_min=active_filters.price_min,
+            price_max=cap,
+            store=active_filters.store,
+        )
+        if item.id in checking_ids and pricing["best_offer"] is None:
+            pricing["price_status"] = "checking"
+        return {**metadata.get(item.id, {}), **asdict(item), **pricing}
+
+    if settings.pricing_auto_refresh and settings.serpapi_key:
+        candidates = get_catalog().perfumes
+        pending = [
+            (
+                pid,
+                candidates.at[get_catalog().row_of[pid], "brand"],
+                candidates.at[get_catalog().row_of[pid], "name"],
+            )
+            for pid in sorted(ids)
+            if pid not in by_id
+        ]
+        pending = await due_items(session, pending)
+        checking_ids = {pid for pid, _, _ in pending}
+        background_tasks.add_task(refresh_batch, pending)
     return {
         "rows": [
             {
                 "key": row.key,
                 "title": row.title,
                 "subtitle": f"{len(row.items)} recommendations",
-                "items": [{**metadata.get(item.id, {}), **asdict(item)} for item in row.items],
+                "items": [priced_card(item, row.key) for item in row.items],
             }
             for row in rows
         ]
@@ -230,7 +306,11 @@ async def recommendations(
 
 
 @router.get("/perfume/{perfume_id}")
-def perfume_detail(perfume_id: int):
+async def perfume_detail(
+    perfume_id: int,
+    background_tasks: BackgroundTasks,
+    session=Depends(get_session),  # noqa: B008
+):  # noqa: B008
     catalog = get_catalog()
     if perfume_id not in catalog.row_of:
         raise HTTPException(404, "Perfume not found")
@@ -259,5 +339,12 @@ def perfume_detail(perfume_id: int):
         *(f"season_share_{s}" for s in ("winter", "spring", "summer", "autumn")),
     }
     result = {k: v for k, v in result.items() if k in allowed}
-    result["offers"] = []  # populated by the pricing service in milestone 7
+    prices = tuple(o for o in await load_prices(session) if o.perfume_id == perfume_id)
+    meta = catalog.perfumes.loc[catalog.row_of[perfume_id]]
+    result.update(summary(prices, meta.brand, meta["name"]))
+    if not prices and settings.pricing_auto_refresh and settings.serpapi_key:
+        pending = await due_items(session, [(perfume_id, meta.brand, meta["name"])])
+        if pending:
+            result["price_status"] = "checking"
+            background_tasks.add_task(refresh_batch, pending)
     return result

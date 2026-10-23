@@ -10,6 +10,10 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./dev.db"
     serpapi_key: str = ""
+    pricing_daily_request_limit: int = 10
+    pricing_lazy_per_request: int = 2
+    pricing_cache_days: int = 7
+    pricing_auto_refresh: bool = False
     auth_secret: str = "change-me"
     cookie_secure: bool = False
     session_lifetime_seconds: int = 604800

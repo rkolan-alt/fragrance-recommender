@@ -2,10 +2,19 @@
 
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from fastapi_users.db import SQLAlchemyBaseOAuthAccountTableUUID, SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -75,3 +84,33 @@ class Feedback(Base):
     perfume_id: Mapped[int]
     action: Mapped[str] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Offer(Base):
+    __tablename__ = "offers"
+    __table_args__ = (
+        CheckConstraint("price > 0 AND size_ml > 0"),
+        CheckConstraint("store IN ('amazon', 'jomashop')"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    perfume_id: Mapped[int] = mapped_column(index=True)
+    store: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(1000))
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    size_ml: Mapped[float]
+    concentration: Mapped[str] = mapped_column(String(16))
+    url: Mapped[str] = mapped_column(String(4000))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class PriceRefresh(Base):
+    __tablename__ = "price_refresh"
+    perfume_id: Mapped[int] = mapped_column(primary_key=True)
+    state: Mapped[str] = mapped_column(String(16))
+    next_refresh_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PricingQuota(Base):
+    __tablename__ = "pricing_quota"
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    requests: Mapped[int] = mapped_column(default=0)

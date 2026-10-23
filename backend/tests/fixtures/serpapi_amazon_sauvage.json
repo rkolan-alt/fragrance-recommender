@@ -1,0 +1,99 @@
+{
+  "fixture_note": "Public product fields recorded from a live SerpApi Amazon search; prices are historical test data, not current offers.",
+  "organic_results": [
+    {
+      "title": "Christian Dior Sauvage Eau De Parfum Spray For Men, 3.4 Ounce",
+      "link_clean": "https://www.amazon.com/Sauvage-Dior-Parfum-Spray-100ml/dp/B079TQS99Q/",
+      "price": "$130.99",
+      "extracted_price": 130.99
+    },
+    {
+      "title": "Sauvage Parfum Spray for Men 3.4 Ounces",
+      "link_clean": "https://www.amazon.com/Dior-sauvage-parfum-spray-mens/dp/B07X5D6DH4/",
+      "price": "$167.99",
+      "extracted_price": 167.99
+    },
+    {
+      "title": "Sauvage for Men, Eau de Parfum Spray, 6.80 Fl Oz (Pack of 1)",
+      "link_clean": "https://www.amazon.com/Christian-Dior-Sauvage-Toilette-Bottle/dp/B004THGNH4/",
+      "price": "$204.59",
+      "extracted_price": 204.59,
+      "stock": "Only 4 left in stock - order soon."
+    },
+    {
+      "title": "Sauvage by Dior Eau de Parfum Spray, 2 Fl Oz",
+      "link_clean": "https://www.amazon.com/Sauvage-Dior-Parfum-Spray-60ml/dp/B079TR2JHT/",
+      "price": "$99.98",
+      "extracted_price": 99.98
+    },
+    {
+      "title": "Sauvage Eau de Toilette Splash Mini for Men, 0.34 Ounce / 10ml",
+      "link_clean": "https://www.amazon.com/Dior-Sauvage-Toilette-Travel-Size/dp/B016G3VV5W/",
+      "price": "$36.88",
+      "extracted_price": 36.88
+    },
+    {
+      "title": "Sauvage by Christian Dior for Men - 6.8 oz Parfum Spray",
+      "link_clean": "https://www.amazon.com/Sauvage-Christian-Dior-Parfum-Spray/dp/B08GGC3HGF/",
+      "price": "$222.99",
+      "extracted_price": 222.99
+    },
+    {
+      "title": "Christian Dior Sauvage Elixir For Men 3.4 Ounce",
+      "link_clean": "https://www.amazon.com/Christian-Dior-Sauvage-Elixir-Men/dp/B0BCWG85TB/",
+      "price": "$216.99",
+      "extracted_price": 216.99
+    },
+    {
+      "title": "Christian Sauvage Eau Forte Parfum For Men 3.4 Fl Oz",
+      "link_clean": "https://www.amazon.com/Dior-Christian-Sauvage-Forte-Parfum/dp/B0DBQXLLHH/",
+      "price": "$138.70",
+      "extracted_price": 138.7
+    },
+    {
+      "title": "Sauvage Parfum Spray For Men, 3.4 Ounce",
+      "link_clean": "https://www.amazon.com/Dior-Sauvage-Christian-Parfum-Limited/dp/B0C4Q61M5D/",
+      "price": "$210.00",
+      "extracted_price": 210.0
+    },
+    {
+      "title": "Sauvage parfum for men 100 ml",
+      "link_clean": "https://www.amazon.com/Dior-Sauvage-parfum-men-100/dp/B0DY1VSLC4/",
+      "price": "$185.86",
+      "extracted_price": 185.86
+    },
+    {
+      "title": "Salvage for Men 3.4 Oz Men's Eau De Toilette Spray Refreshing & Warm Masculine Scent for Daily Use Men's Casual Cologne Great Holiday Gift Smell Fresh All Day A Gift for Any Occasion",
+      "link_clean": "https://www.amazon.com/dp/B0891N6VLW/",
+      "price": "$21.99",
+      "extracted_price": 21.99
+    },
+    {
+      "title": "Sauvage by Christian Dior Parfum Spray 2 oz",
+      "link_clean": "https://www.amazon.com/Sauvage-Parfum-Spray-Christian-Dior/dp/B081QZH8CL/",
+      "price": "$134.98",
+      "extracted_price": 134.98
+    },
+    {
+      "title": "Eau Sauvage by Christian Men 3.4 oz Parfum Spray",
+      "link_clean": "https://www.amazon.com/Christian-Dior-Sauvage-Parfum-Spray/dp/B0083WWRIK/",
+      "price": "$128.56",
+      "extracted_price": 128.56,
+      "stock": "Only 17 left in stock - order soon."
+    },
+    {
+      "title": "Sauvage Perfume for Men \u2013 Mini Fragrance Gift Set EDP & Shower Gel Duo Travel Set",
+      "link_clean": "https://www.amazon.com/Dior-SAUVAGE-Perfume-Shower-Travel/dp/B0CJ43ZW4K/",
+      "price": "$54.99",
+      "extracted_price": 54.99,
+      "stock": "Only 12 left in stock - order soon."
+    },
+    {
+      "title": "Christian Dior Sauvage For Men 2 Piece Set (3.4 Oz Eau De Parfum Spray / 0.34 Oz Eau De Parfum Spray /10 Ml Mini)",
+      "link_clean": "https://www.amazon.com/Fahrenheit-Christian-Dior-Homme-Cologne/dp/B007QTMS5I/",
+      "price": "$196.93",
+      "extracted_price": 196.93,
+      "stock": "Only 2 left in stock - order soon."
+    }
+  ]
+}

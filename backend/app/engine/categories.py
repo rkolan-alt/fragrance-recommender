@@ -24,11 +24,13 @@ def recommend_rows(
     ratings: dict[int, int] | None = None,
     disliked_ids: tuple[int, ...] = (),
     excluded_ids: tuple[int, ...] = (),
+    prices: tuple = (),
 ) -> list[CategoryRow]:
     owned = catalog.rows(list(dict.fromkeys(owned_ids)))
     if len(owned) < 5:
         raise ValueError("add at least five distinct owned fragrances")
-    base = candidate_mask(catalog, owned, filters or Filters())
+    filters = filters or Filters()
+    base = candidate_mask(catalog, owned, filters, prices)
     if excluded_ids:
         base[catalog.rows(list(excluded_ids))] = False
 
@@ -40,14 +42,30 @@ def recommend_rows(
     p = catalog.perfumes
     rows = []
 
-    def add(key, title, mask, local_profile=profile, local_sims=sims, weights=None):
+    def add(key, title, mask, local_profile=profile, local_sims=sims, weights=None, bonus=None):
         rows.append(
             CategoryRow(
-                key, title, rank(catalog, local_profile, base & mask, local_sims, weights, limit)
+                key,
+                title,
+                rank(catalog, local_profile, base & mask, local_sims, weights, limit, bonus),
             )
         )
 
     add("for_you", "For You", base)
+    from app.pricing.service import eligible
+
+    cap = (
+        min(filters.budget_max, filters.price_max)
+        if filters.price_max is not None
+        else filters.budget_max
+    )
+    affordable = eligible(prices, price_min=filters.price_min, price_max=cap, store=filters.store)
+    value = np.zeros(len(p))
+    for offer in affordable:
+        if offer.perfume_id in catalog.row_of:
+            r = catalog.row_of[offer.perfume_id]
+            value[r] = max(value[r], 0.03 / (1 + float(offer.price) / offer.size_ml))
+    add("budget", f"Budget · under ${cap:g}", value > 0, bonus=value)
     for key, title, column in (
         ("spring_summer", "Spring / Summer", "warm_share"),
         ("fall_winter", "Fall / Winter", "cold_share"),
