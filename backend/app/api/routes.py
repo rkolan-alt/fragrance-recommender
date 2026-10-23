@@ -22,7 +22,8 @@ from app.engine.catalog import load_catalog
 from app.engine.categories import recommend_rows
 from app.engine.recommend import Filters
 from app.images import get_image_url
-from app.pricing.service import due_items, load_prices, refresh_batch, summary
+from app.pricing.discovery import price_candidates
+from app.pricing.service import due_items, load_prices, load_product_links, refresh_batch, summary
 
 router = APIRouter()
 
@@ -195,12 +196,17 @@ async def recommendations(
     session=Depends(get_session),  # noqa: B008
 ):  # noqa: B008
     prices = await load_prices(session)
+    product_links = await load_product_links(session)
     response_filters = body.filters or FilterRequest()
     row_filters = {}
+    discovery_ratings = None
+    discovery_disliked = ()
+    discovery_excluded = ()
     try:
         if user is None:
             if body.owned_ids is None or len(set(body.owned_ids)) < 5:
                 raise HTTPException(422, "Add at least five distinct owned fragrances")
+            discovery_owned = list(sorted(set(body.owned_ids)))
             rows = await run_in_threadpool(
                 cached_recommend,
                 tuple(sorted(set(body.owned_ids))),
@@ -232,6 +238,16 @@ async def recommendations(
                     .where(SavedFilter.user_id == user.id)
                     .order_by(SavedFilter.name)
                 )
+            )
+            discovery_owned = [pid for pid, status, _ in state if status == "owned"]
+            discovery_ratings = {
+                pid: rating
+                for pid, status, rating in state
+                if status == "owned" and rating is not None
+            }
+            discovery_disliked = tuple(pid for pid, status, _ in state if status == "disliked")
+            discovery_excluded = tuple(
+                set(hidden) | {pid for pid, status, _ in state if status != "owned"}
             )
             default = next((f.filter_json for f in saved if f.is_default), {})
             filters = body.filters or FilterRequest.model_validate(default)
@@ -315,6 +331,7 @@ async def recommendations(
             price_min=active_filters.price_min,
             price_max=cap,
             store=active_filters.store,
+            product_link=product_links.get(item.id),
         )
         if item.id in checking_ids and pricing["best_offer"] is None:
             pricing["price_status"] = "checking"
@@ -336,7 +353,27 @@ async def recommendations(
             for pid in sorted(ids)
             if pid not in by_id
         ]
-        pending = await due_items(session, pending)
+        value_candidates = await run_in_threadpool(
+            price_candidates,
+            get_catalog(),
+            discovery_owned,
+            Filters(**response_filters.model_dump()),
+            ratings=discovery_ratings,
+            disliked_ids=discovery_disliked,
+            excluded_ids=discovery_excluded,
+            priced_ids=tuple(by_id),
+        )
+        # Unknown value candidates must be considered even when they cannot yet
+        # appear in the price-gated Budget row. Alternate with normal card lookups.
+        combined = []
+        for i in range(max(len(value_candidates), len(pending))):
+            if i < len(value_candidates):
+                combined.append(value_candidates[i])
+            if i < len(pending):
+                combined.append(pending[i])
+        seen = set()
+        combined = [item for item in combined if not (item[0] in seen or seen.add(item[0]))]
+        pending = await due_items(session, combined)
         checking_ids = {pid for pid, _, _ in pending}
         background_tasks.add_task(refresh_batch, pending)
     return {
@@ -389,7 +426,8 @@ async def perfume_detail(
     prices = tuple(o for o in await load_prices(session) if o.perfume_id == perfume_id)
     meta = catalog.perfumes.loc[catalog.row_of[perfume_id]]
     result["image_url"] = get_image_url(perfume_id)
-    result.update(summary(prices, meta.brand, meta["name"]))
+    links = await load_product_links(session)
+    result.update(summary(prices, meta.brand, meta["name"], product_link=links.get(perfume_id)))
     if not prices and settings.pricing_auto_refresh and settings.serpapi_key:
         pending = await due_items(session, [(perfume_id, meta.brand, meta["name"])])
         if pending:

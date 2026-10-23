@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from app.engine import config
 from app.engine.catalog import Catalog
 from app.engine.recommend import Filters, Rec, build_profile, candidate_mask, rank, similarity
 
@@ -65,7 +66,26 @@ def recommend_rows(
         if offer.perfume_id in catalog.row_of:
             r = catalog.row_of[offer.perfume_id]
             value[r] = max(value[r], 0.03 / (1 + float(offer.price) / offer.size_ml))
-    add("budget", f"Budget · under ${cap:g}", value > 0, bonus=value)
+    budget_mask = value > 0
+    available = budget_mask & base
+    if available.any():
+        # Judge taste relative to purchasable affordable choices, rather than
+        # excluding every budget option because an unpriced luxury scent wins.
+        threshold = max(
+            np.quantile(sims[available], config.BUDGET_SIMILARITY_QUANTILE),
+            config.BUDGET_RELATIVE_MATCH_FLOOR * sims[available].max(),
+        )
+        budget_mask &= sims >= threshold
+    add("budget", f"Budget · under ${cap:g}", budget_mask, bonus=value)
+    from app.pricing.discovery import VALUE_HOUSES
+
+    # Lead this category with verified value-house matches, keeping the existing
+    # taste/quality ranking within each group. Other affordable houses fill it out.
+    budget = rows[-1]
+    value_items = [item for item in budget.items if item.brand.casefold() in VALUE_HOUSES]
+    other_items = [item for item in budget.items if item.brand.casefold() not in VALUE_HOUSES]
+    rows[-1] = CategoryRow(budget.key, budget.title, value_items + other_items)
+
     for key, title, column in (
         ("spring_summer", "Spring / Summer", "warm_share"),
         ("fall_winter", "Fall / Winter", "cold_share"),

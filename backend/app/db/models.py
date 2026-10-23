@@ -114,3 +114,13 @@ class PricingQuota(Base):
     __tablename__ = "pricing_quota"
     day: Mapped[str] = mapped_column(String(10), primary_key=True)
     requests: Mapped[int] = mapped_column(default=0)
+
+
+class ProductLink(Base):
+    """An identified retail product whose listing lacks a comparable bottle price."""
+
+    __tablename__ = "product_links"
+    perfume_id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(String(4000))
+    title: Mapped[str] = mapped_column(String(1000))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

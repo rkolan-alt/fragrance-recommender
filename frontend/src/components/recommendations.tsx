@@ -21,7 +21,8 @@ const money = new Intl.NumberFormat("en-US", {
 const descriptions: Record<string, string> = {
   for_you:
     "Familiar notes. New possibilities. A match for your whole collection.",
-  budget: "Your taste, at a smaller price. Matched Amazon bottles under $60.",
+  budget:
+    "Value finds led by Middle Eastern houses, matched to your taste. Bottles under $60.",
   spring_summer: "Lighter compositions for longer, warmer days.",
   fall_winter: "Depth and warmth for the cooler months.",
   long_lasting: "Fragrances with community-backed staying power.",
@@ -43,8 +44,17 @@ function Rating({ item }: { item: Recommendation }) {
 }
 function BuyLink({ item }: { item: Recommendation }) {
   const offer = item.best_offer;
-  const href = amazonUrl(offer?.url);
-  if (!offer || !href) return null;
+  const href = amazonUrl(offer?.url || item.amazon_link?.url);
+  if (!href) return null;
+  if (!offer)
+    return (
+      <div className="offer">
+        <small>Check bottle size and current price</small>
+        <a href={href} target="_blank" rel="noopener noreferrer">
+          View on Amazon ↗<span className="sr-only"> (opens in a new tab)</span>
+        </a>
+      </div>
+    );
   return (
     <div className="offer">
       <div>
@@ -125,7 +135,7 @@ export function RecommendationCarousel({
       {row.items.length === 0 ? (
         <div className="row-empty">
           {row.key === "budget"
-            ? "No matched Amazon bottles under $60 yet. Other rows still have discoveries for you."
+            ? "No matched bottles under $60 fit this collection yet. Other rows still have discoveries for you."
             : "No matches in this category for your collection right now."}
         </div>
       ) : (

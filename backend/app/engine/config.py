@@ -143,3 +143,7 @@ LINE_SUFFIXES = {
     "homme", "femme", "for men", "for women", "for him", "for her", "eau fraiche",
     "concentree", "eau extreme", "extreme", "essence de parfum", "oil", "all-over spray",
 }  # fmt: skip
+
+# Budget should not fill a sparse price cache with scents unrelated to the collection.
+BUDGET_SIMILARITY_QUANTILE = 0.40
+BUDGET_RELATIVE_MATCH_FLOOR = 0.75

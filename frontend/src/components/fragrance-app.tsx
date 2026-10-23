@@ -207,7 +207,21 @@ export default function FragranceApp() {
                       <PerfumePhoto perfume={perfume} variant="thumb" />
                       <div>
                         <small>{perfume.brand}</small>
-                        <strong>{perfume.name}</strong>
+                        <button
+                          className="collection-name"
+                          aria-label={`View details for ${perfume.brand} ${perfume.name}`}
+                          onClick={() =>
+                            setDetail({
+                              ...perfume,
+                              because_of: perfume.id,
+                              shared_notes: [],
+                              shared_accords: [],
+                              best_offer: null,
+                            })
+                          }
+                        >
+                          {perfume.name}
+                        </button>
                       </div>
                       <button
                         className="icon-button remove-button"

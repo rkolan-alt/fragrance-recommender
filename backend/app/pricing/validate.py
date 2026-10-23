@@ -20,7 +20,7 @@ from app.engine.catalog import load_catalog
 from app.engine.categories import recommend_rows
 from app.engine.recommend import Filters
 from app.pricing.client import amazon_offers
-from app.pricing.matching import IdentityIndex, assess_offer, concentration
+from app.pricing.matching import IdentityIndex, assess_offer, match_product_link
 from app.pricing.service import Price, load_prices, refresh_one
 
 DEFAULT_IDS = [62583, 62762, 25967, 48100, 67502, 39355, 48115, 70090]
@@ -76,6 +76,7 @@ def write_json(path, value):
 def analyze(snapshot, identity_index=None):
     decisions = []
     accepted = {}
+    product_link = None
     raw_rows = snapshot["payload"]["organic_results"]
     for index, raw in enumerate(raw_rows):
         if raw.get("no_featured_offers_available"):
@@ -85,6 +86,10 @@ def analyze(snapshot, identity_index=None):
             offer, reason = assess_offer(
                 snapshot["brand"], snapshot["name"], normalized, identity_index=identity_index
             )
+            if identity_index is not None and product_link is None:
+                product_link = match_product_link(
+                    snapshot["brand"], snapshot["name"], normalized, identity_index=identity_index
+                )
         decisions.append({"index": index, "title": raw.get("title"), "reason": reason})
         if offer:
             accepted[offer.url] = offer
@@ -95,6 +100,7 @@ def analyze(snapshot, identity_index=None):
         "fetched_at": snapshot["fetched_at"],
         "listings": len(raw_rows),
         "accepted_offers": [asdict(offer) for offer in accepted.values()],
+        "amazon_link": asdict(product_link) if product_link else None,
         "rejection_counts": dict(
             Counter(d["reason"] for d in decisions if d["reason"] != "accepted")
         ),
@@ -152,10 +158,10 @@ async def run(args):
             raise ValueError("Unknown sample perfume IDs")
         selected = list(dict.fromkeys(ids))
         if not args.ids:
-            # Fill remaining slots with popular, different-brand, explicit variants.
+            # Fill remaining slots with popular, different-brand fragrances.
             brands = set(p[p.id.isin(ids)].brand)
             for row in p[p.in_pool].sort_values("vote_count", ascending=False).itertuples():
-                if concentration(row.name) and row.brand not in brands:
+                if row.brand not in brands:
                     selected.append(int(row.id))
                     brands.add(row.brand)
                 if len(selected) >= args.limit:

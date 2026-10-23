@@ -23,6 +23,7 @@ export type Recommendation = Perfume & {
   shared_accords: string[];
   shared_notes: string[];
   best_offer: Offer | null;
+  amazon_link?: { url: string; title: string; fetched_at: string } | null;
 };
 export type RecommendationRow = {
   key: string;

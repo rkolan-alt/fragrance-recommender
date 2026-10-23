@@ -245,7 +245,7 @@ def test_refresh_lease_prevents_duplicate_concurrent_provider_calls(account_app)
     asyncio.run(run())
 
 
-def test_lazy_refresh_skips_cached_and_ambiguous_variants(account_app):  # noqa: F811
+def test_lazy_refresh_skips_cached_but_allows_unqualified_names(account_app):  # noqa: F811
     from app.pricing.service import due_items
 
     _, factory = account_app
@@ -261,7 +261,7 @@ def test_lazy_refresh_skips_cached_and_ambiguous_variants(account_app):  # noqa:
                     (3, "Chanel", "Bleu de Chanel EDP"),
                 ],
             )
-            assert [i[0] for i in due] == [3]
+            assert [i[0] for i in due] == [2, 3]
 
     asyncio.run(run())
 

@@ -17,7 +17,8 @@ CONCENTRATIONS = {
 SIZE = re.compile(r"\b(\d+(?:[.,]\d+)?)\s*(ml|milliliters?|fl\.?\s*oz\.?|ounces?|oz)\b")
 EXCLUDED = re.compile(
     r"\b(?:tester|testers|sample|samples|decant|decants|mini|miniature|refill|refillable|"
-    r"gift set|giftset|set|shower|deodorant|lotion|body wash|hair mist|used|preowned|"
+    r"gift set|giftset|set|bundle|bundles|shower|deodorant|lotion|body wash|"
+    r"hair mist|used|preowned|"
     r"pre owned|travel|roll on|rollerball|solid|oil|inspired|dupe|impression|type)\b"
 )
 GENERIC = {
@@ -54,11 +55,12 @@ BRAND_ALIASES = {
 def normalize(value):
     value = unicodedata.normalize("NFKD", value).casefold()
     value = re.sub(r"\b(men|women)['’]s\b", r"\1s", value)
+    value = re.sub(r"['’‘`ʼ]", "", value)
     value = "".join(c for c in value if not unicodedata.combining(c))
     return re.sub(r"\s+", " ", re.sub(r"[^\w., ]", " ", value)).strip()
 
 
-def concentration(title):
+def declared_concentrations(title):
     text = normalize(title)
     found = []
     for name, pattern in CONCENTRATIONS.items():
@@ -67,6 +69,11 @@ def concentration(title):
             # Remove specific phrases before checking bare "parfum", so an EDP
             # is one concentration but an EDP + EDT bundle remains ambiguous.
             text = re.sub(pattern, " ", text)
+    return found
+
+
+def concentration(title):
+    found = declared_concentrations(title)
     return found[0] if len(found) == 1 else None
 
 
@@ -81,8 +88,16 @@ def size_ml(title):
     return round(sizes[0], 1) if 25 <= sizes[0] <= 300 else None
 
 
+def gender_hint(text):
+    text = normalize(text)
+    male = bool(re.search(r"\b(?:men|mens|homme)\b", text))
+    female = bool(re.search(r"\b(?:women|womens|femme)\b", text))
+    return "male" if male and not female else "female" if female and not male else None
+
+
 def identity(title):
     text = SIZE.sub(" ", normalize(title))
+    text = re.sub(r"\bpour (?:homme|femme)\b", " ", text)
     for pattern in CONCENTRATIONS.values():
         text = re.sub(pattern, " ", text)
     text = re.sub(r"[^a-z0-9 ]", " ", text)
@@ -110,13 +125,26 @@ def assess_offer(
     title = raw.get("title", "")
     if not isinstance(title, str) or EXCLUDED.search(normalize(title)):
         return None, "excluded_product"
+    expected_gender, actual_gender = gender_hint(name), gender_hint(title)
+    if expected_gender and actual_gender and expected_gender != actual_gender:
+        return None, "gender_variant_mismatch"
     expected = concentration(name)
     actual = concentration(title)
     # Ambiguous catalog variants cannot safely be advertised as the same bottle.
-    if expected is None or actual != expected:
+    if actual is None or (expected is not None and actual != expected):
         return None, "concentration_mismatch_or_missing"
+    if expected is None:
+        if identity_index is None:
+            return None, "catalog_identity_context_required"
+        if not identity_index.accepts_concentration(brand, name, actual):
+            return None, "concentration_belongs_to_named_variant"
     size = size_ml(title)
-    if size is None or re.search(r"\b\d+\s*[x×]\s*\d", title.casefold()):
+    pack = re.search(r"\bpack of (\d+)\b", normalize(title))
+    if (
+        size is None
+        or re.search(r"\b\d+\s*[x×]\s*\d", title.casefold())
+        or (pack and int(pack[1]) != 1)
+    ):
         return None, "invalid_or_missing_size"
     source = normalize(str(raw.get("source", "")))
     store = {
@@ -200,6 +228,16 @@ class IdentityIndex:
                 self.by_scent.setdefault(tokens, set()).add(key)
                 self.by_brand.setdefault(key, set()).add((tokens, concentration(name)))
 
+    def accepts_concentration(self, brand, name, actual):
+        # Use the listing's declared concentration for unqualified catalog names.
+        # If the catalog has that explicitly named version, it belongs to that
+        # separate entry (Sauvage EDP must not be attached to base Sauvage).
+        tokens, _ = identity_tokens(brand, name)
+        return not any(
+            other == tokens and variant == actual
+            for other, variant in self.by_brand.get(canonical_brand(brand), ())
+        )
+
     def accepts(self, brand, name, title, target, actual, url=None):
         if not target <= actual:
             return False
@@ -216,6 +254,24 @@ class IdentityIndex:
             for length in range(1, len(words) + 1):
                 other = self.brands.get(" ".join(words[:length]))
                 if other and other != own and not set(other.split()) <= target:
+                    return False
+        # A distinct name before an explicit gender byline is not advertising
+        # copy: "Daarej Verve for Men" must not become original Daarej.
+        gender_byline = re.search(r"\bfor (?:men|women)\b", title, flags=re.I)
+        if gender_byline:
+            prefix = title[: gender_byline.start()]
+            prefix = re.split(r"\s+[-–|]\s+", prefix, maxsplit=1)[0]
+            for pattern in CONCENTRATIONS.values():
+                prefix = re.sub(pattern, " ", prefix, flags=re.I)
+            prefix_tokens, _ = identity_tokens(brand, prefix)
+            harmless = {"luxury", "authentic", "long", "lasting"}
+            if target <= prefix_tokens and prefix_tokens - target - harmless:
+                return False
+        # Multiple different catalog fragrances joined by &/and form a bundle,
+        # even if the retailer forgot to use the word "bundle".
+        if re.search(r"&|\band\b", title, flags=re.I):
+            for tokens, _variant in self.by_brand.get(own, ()):
+                if tokens and not tokens <= target and tokens <= actual:
                     return False
         # Shared names (e.g. Legend by Montblanc and Sapil) need brand context.
         # A product URL's words can disambiguate search results but never replace
@@ -249,6 +305,7 @@ def get_identity_index():
 def identity_matches(brand: str, name: str, title: str, *, identity_index=None, url=None) -> bool:
     if EXCLUDED.search(normalize(title)):
         return False
+    title = re.sub(r"\bluxury cologne\b", " ", title, flags=re.I)
     # Advertising note lists are descriptions, not additional fragrance names.
     title = re.split(
         r"\b(?:with notes of|notes of|top notes|heart notes|base notes)\b",
@@ -268,3 +325,53 @@ def identity_matches(brand: str, name: str, title: str, *, identity_index=None, 
         return identity_index.accepts(brand, name, title, target, actual, url)
     # Standalone callers without catalog context retain exact scent matching.
     return target == actual
+
+
+@dataclass(frozen=True)
+class MatchedProductLink:
+    url: str
+    title: str
+
+
+def match_product_link(brand, name, raw, *, identity_index):
+    """Identify a real product URL without claiming its price or bottle size."""
+    title, url = raw.get("title"), raw.get("link")
+    if not isinstance(title, str) or not isinstance(url, str) or EXCLUDED.search(normalize(title)):
+        return None
+    pack = re.search(r"\bpack of (\d+)\b", normalize(title))
+    if pack and int(pack[1]) != 1:
+        return None
+    try:
+        parsed = urlparse(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in {"amazon.com", "www.amazon.com"}
+            or parsed.username
+            or parsed.password
+            or not re.search(r"/(?:dp|gp/product)/[A-Z0-9]{10}(?:/|$)", parsed.path)
+        ):
+            return None
+    except ValueError:
+        return None
+    if normalize(str(raw.get("source", ""))) not in {"amazon", "amazon.com"}:
+        return None
+    if len(declared_concentrations(title)) > 1:
+        return None
+    expected, actual = concentration(name), concentration(title)
+    if expected and actual and expected != actual:
+        return None
+    if not expected and actual and not identity_index.accepts_concentration(brand, name, actual):
+        return None
+    if gender_hint(name) and gender_hint(title) and gender_hint(name) != gender_hint(title):
+        return None
+    if not identity_matches(brand, name, title, identity_index=identity_index, url=url):
+        return None
+    # Link-only results must positively mention the expected brand in title/URL.
+    own = canonical_brand(brand)
+    context = identity(title + " " + unquote(parsed.path).replace("-", " "))
+    if not any(
+        re.search(r"\b" + re.escape(v) + r"\b", context)
+        for v in [own, *(identity(a) for a in BRAND_ALIASES.get(own, ()))]
+    ):
+        return None
+    return MatchedProductLink(url, title)

@@ -8,10 +8,10 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
-from app.db.models import Offer, PriceRefresh, PricingQuota
+from app.db.models import Offer, PriceRefresh, PricingQuota, ProductLink
 from app.db.session import session_factory
 from app.pricing.client import PricingError, PricingQuotaError, SerpApiClient
-from app.pricing.matching import get_identity_index, match_offer
+from app.pricing.matching import get_identity_index, match_offer, match_product_link
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,23 @@ async def load_prices(session) -> tuple[Price, ...]:
     )
 
 
+async def load_product_links(session):
+    cutoff = datetime.now(UTC) - timedelta(days=settings.pricing_cache_days)
+    links = await session.scalars(select(ProductLink).where(ProductLink.fetched_at >= cutoff))
+    return {
+        row.perfume_id: {
+            "url": row.url,
+            "title": row.title,
+            "fetched_at": (
+                row.fetched_at.replace(tzinfo=UTC)
+                if row.fetched_at.tzinfo is None
+                else row.fetched_at
+            ).isoformat(),
+        }
+        for row in links
+    }
+
+
 def eligible(prices, *, price_min=None, price_max=None, store="any"):
     return tuple(
         p
@@ -69,7 +86,7 @@ def eligible(prices, *, price_min=None, price_max=None, store="any"):
     )
 
 
-def summary(prices, brand, name, *, price_min=None, price_max=None, store="any"):
+def summary(prices, brand, name, *, price_min=None, price_max=None, store="any", product_link=None):
     prices = eligible(prices, price_min=price_min, price_max=price_max, store=store)
     groups = {}
     for p in prices:
@@ -91,7 +108,8 @@ def summary(prices, brand, name, *, price_min=None, price_max=None, store="any")
         "offers": [p.public() for p in prices],
         "best_offer": best.public() if best else None,
         "best_value_offer": value.public() if value else None,
-        "price_status": "cached" if prices else "unavailable",
+        "price_status": "cached" if prices else "link_only" if product_link else "unavailable",
+        "amazon_link": product_link,
         "pricing_source": "amazon",
         "price_label": "Best matched Amazon offer",
         "price_basis": (
@@ -122,7 +140,9 @@ async def _claim(session, pid, now, retry_completed=False):
             PriceRefresh.perfume_id == pid,
             or_(
                 PriceRefresh.next_refresh_at <= now,
-                PriceRefresh.state.in_(["ready", "no_match"]) if retry_completed else False,
+                PriceRefresh.state.in_(["ready", "no_match", "link_only"])
+                if retry_completed
+                else False,
             ),
         )
         .execution_options(synchronize_session=False)
@@ -164,11 +184,6 @@ async def refresh_one(
 ):
     if client is None and not settings.serpapi_key:
         return "not_configured"
-    # Unknown concentration is intentionally not guessed or sent as a paid query.
-    from app.pricing.matching import concentration
-
-    if concentration(name) is None:
-        return "ambiguous_variant"
     now = datetime.now(UTC)
     async with (factory or session_factory)() as session:
         if not await _claim(session, pid, now, retry_completed):
@@ -216,15 +231,29 @@ async def refresh_one(
             )
             await session.commit()
             return "error"
-        return await store_matches(session, pid, list(matched.values()), now)
+        product_link = next(
+            (
+                link
+                for result in results
+                if index is not None
+                and (link := match_product_link(brand, name, result, identity_index=index))
+            ),
+            None,
+        )
+        return await store_matches(
+            session, pid, list(matched.values()), now, product_link=product_link
+        )
 
 
-async def store_matches(session, pid, matched, now):
+async def store_matches(session, pid, matched, now, *, product_link=None):
     """Persist one successful, already-quota-counted observation atomically."""
     await session.execute(delete(Offer).where(Offer.perfume_id == pid))
     for m in matched:
         session.add(Offer(perfume_id=pid, **asdict(m), fetched_at=now))
-    state = "ready" if matched else "no_match"
+    await session.execute(delete(ProductLink).where(ProductLink.perfume_id == pid))
+    if product_link:
+        session.add(ProductLink(perfume_id=pid, **asdict(product_link), fetched_at=now))
+    state = "ready" if matched else "link_only" if product_link else "no_match"
     record = await session.get(PriceRefresh, pid)
     if record is None:
         record = PriceRefresh(perfume_id=pid)
@@ -241,9 +270,6 @@ async def refresh_batch(items, *, factory=None):
 
 
 async def due_items(session, items):
-    from app.pricing.matching import concentration
-
-    items = [item for item in items if concentration(item[2]) is not None]
     if not items:
         return []
     states = await session.scalars(

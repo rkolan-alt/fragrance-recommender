@@ -17,6 +17,11 @@ def client(monkeypatch):
         return ()
 
     monkeypatch.setattr(routes, "load_prices", no_prices)
+
+    async def no_product_links(session):
+        return {}
+
+    monkeypatch.setattr(routes, "load_product_links", no_product_links)
     routes.search_names.cache_clear()
     routes.cached_recommend.cache_clear()
     yield TestClient(app)
@@ -178,3 +183,49 @@ def test_search_handles_accents_and_punctuation_only_input(client, monkeypatch):
     routes.search_names.cache_clear()
     assert client.get("/search", params={"q": "Chloe eau de parfum"}).json()[0]["id"] == 1733
     assert client.get("/search", params={"q": "'' --"}).json() == []
+
+
+def test_direct_amazon_link_does_not_invent_a_price_or_enter_budget(client, monkeypatch):
+    async def links(session):
+        return {
+            6: {
+                "url": "https://www.amazon.com/dp/B071CYS5ZZ/",
+                "title": "Perfume 6",
+                "fetched_at": "2026-10-23",
+            }
+        }
+
+    monkeypatch.setattr(routes, "load_product_links", links)
+    detail = client.get("/perfume/6").json()
+    assert detail["best_offer"] is None and detail["amazon_link"]["url"].endswith("B071CYS5ZZ/")
+    data = client.post(
+        "/recommend", json={"owned_ids": [1, 2, 3, 4, 5], "categories": ["for_you", "budget"]}
+    ).json()
+    budget = next(row for row in data["rows"] if row["key"] == "budget")
+    assert budget["items"] == []
+    item = next(i for i in data["rows"][0]["items"] if i["id"] == 6)
+    assert item["price_status"] == "link_only" and item["best_offer"] is None
+
+
+def test_background_discovery_considers_unpriced_value_candidates_outside_rows(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "pricing_auto_refresh", True)
+    monkeypatch.setattr(settings, "serpapi_key", "fake-key")
+    monkeypatch.setattr(
+        routes,
+        "price_candidates",
+        lambda *args, **kwargs: [(999, "Lattafa Perfumes", "New value candidate")],
+    )
+    seen = []
+
+    async def due(session, items):
+        seen.extend(items)
+        return []
+
+    monkeypatch.setattr(routes, "due_items", due)
+    response = client.post(
+        "/recommend", json={"owned_ids": [1, 2, 3, 4, 5], "categories": ["budget"]}
+    )
+    assert response.status_code == 200
+    assert seen and seen[0][0] == 999

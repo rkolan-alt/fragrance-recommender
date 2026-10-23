@@ -152,7 +152,7 @@ Amazon-specific search engine for Amazon US listings. It accepts only structured
 prices and matching variant titles. No retail pages are scraped by this app.
 Queries include concentration and 100 ml as search hints; matched sizes always
 come from the listing itself.
-`make prices` refreshes up to 50 popular perfumes with explicit concentrations,
+`make prices` refreshes up to 50 popular perfumes,
 subject to a default shared cap of **10 provider attempts per UTC day**. To choose
 perfumes explicitly, run from `backend/`:
 
@@ -173,13 +173,21 @@ uses one SerpApi Amazon US search, counted against the shared UTC daily cap.
 Provider failures back off for six hours; hitting the cap defers for one hour.
 Failures preserve historical offers, but expired prices never qualify for Budget.
 
-Pricing is Amazon-only. Matching requires a direct HTTPS Amazon.com link, an
-explicit catalog concentration, the same fragrance including flanker terms,
+Pricing is Amazon-only. Priced offers require a direct HTTPS Amazon.com link, a
+listing-declared concentration, the same fragrance including flanker terms,
 a 25–300 ml bottle, and a USD price. Testers, samples, decants, sets, refills,
 non-fragrance products, unavailable stock and installment prices are rejected.
-Unknown concentrations are never guessed. Products without a matched Amazon
-offer have no purchase link (`best_offer: null`, `search_links: {}`). Jomashop
-coverage is deferred; no search-link fallback is generated.
+Missing catalog concentrations no longer block pricing. A listing must declare
+its concentration; if that concentration belongs to a separately named catalog
+version (e.g. Sauvage EDP), it is not assigned to the base fragrance. Nothing
+invents bottle size or concentration.
+
+A positively identified Amazon product may have an `amazon_link` without a
+priced offer when its search title omits size/concentration. This shows **View
+on Amazon**, with no quoted price (`best_offer: null`, `price_status: link_only`).
+These product links never qualify for Budget. Products with neither a matched
+offer nor an identified product remain unlinked; search links stay empty.
+Jomashop coverage remains deferred.
 
 Matching allows retail adjectives and descriptive wording around the fragrance
 name. It indexes every catalog fragrance, including those outside the candidate
@@ -192,7 +200,7 @@ Conflicting explicit brands and mixed-concentration bundles remain excluded.
 "Splash" and "Jumbo" are bottle descriptions, and Muelhens is an alias for 4711.
 
 Cards and details include `offers`, `best_offer`, `best_value_offer`,
-`price_status`, `pricing_source`, `price_label`, `price_basis`, and `search_links`.
+`price_status`, `pricing_source`, `price_label`, `price_basis`, `amazon_link`, and `search_links`.
 The best matched Amazon offer prefers a nominal 100 ml bottle (including retail
 3.3/3.4 oz rounding), then smaller sizes from largest to smallest, then larger
 sizes from smallest to largest if no 100 ml or smaller bottle is available.
@@ -245,7 +253,7 @@ Offline replay uses no network requests and does not update cached offers:
 Replay measures matching against historical observations; it does not establish
 that those prices remain available. `--ids` selects fragrances, `--owned-ids`
 sets the test collection, and `--budget-max` sets its budget. `--limit` is 1–15;
-quota exhaustion ends the run early. Unknown catalog concentrations are skipped.
+quota exhaustion ends the run early. Catalog concentration may be absent; retailer concentration is required for priced offers.
 Provider errors/backoff and active leases remain respected with `--retry-cached`.
 
 ### Live validation results — October 22, 2026
@@ -344,3 +352,46 @@ collections resolve their image metadata using their catalog IDs. Bottle photos
 are externally hosted and may differ from current packaging or go unavailable.
 The URLs are not guessed from perfume IDs, and no external image-search service
 or additional SerpApi credits are used.
+
+
+### Budget coverage and collection-specific price discovery
+
+Budget uses only cached matching bottle offers within the selected cap. It now
+keeps the closer scent matches within that affordable pool (top 60% by similarity,
+with a floor of 75% of the best affordable similarity). This avoids repeating all
+cheap bottles for every collection. Verified Middle Eastern value-house matches
+lead the row, retaining taste/quality ranking within that group; other affordable
+houses follow. Clone, owned-item, original-of-owned-dupe, and user filter rules
+still apply. A house name alone never establishes an affordable price.
+
+Price discovery prioritizes collection-matched candidates from Lattafa, Afnan,
+Rasasi, Armaf, Swiss Arabian, Ajmal and other configured value houses, covering
+different brands before more fragrances from one house. It can price candidates
+that do not yet appear in Budget; the old discovery loop only visited displayed
+cards, so it could never grow an empty or tiny price-gated Budget pool.
+
+To explicitly expand coverage for a collection:
+
+```sh
+cd backend
+.venv/bin/python -m app.pricing.refresh --owned-ids 31861 9099 9828 5521 33519 --top 10
+```
+
+Add `--include-clones` to include them in discovery. Existing leases, price
+freshness, failures and the shared daily quota remain respected. Opt-in background
+pricing also alternates value candidates with ordinary recommendation candidates.
+`PRICING_AUTO_REFRESH` remains false by default, and the normal daily cap stays 10.
+
+Eight additional live searches were explicitly authorized for this development
+check. Six produced usable Middle Eastern single-bottle offers: Khamrah Qahwa,
+Honor & Glory, Shaghaf Oud, Rare Reef, Odyssey Limoni Fresh and Casablanca. Daarej
+results were rejected as multipacks, combined products or a different version.
+Aventus yielded an identified Amazon product link without a comparable price;
+the API now serves that link separately. Saved responses are under ignored
+`data/processed/pricing-validation/value-expansion/` and can be replayed without
+more credits. These observations remain subject to normal price expiration.
+
+Collection names now open detail dialogs, so a user can access an identified
+Amazon product link for an owned fragrance such as Aventus as well as a
+recommendation. This UI still does not invent a price when only a link is known.
+Run `make migrate` before starting this version to create the product-links table.
