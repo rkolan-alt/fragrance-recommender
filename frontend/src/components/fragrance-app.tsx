@@ -7,7 +7,9 @@ import type {
   Recommendation,
   RecommendationRow,
 } from "@/lib/types";
-import { useCollection } from "@/lib/collection";
+import { useAccountCollection } from "@/lib/account";
+import { accountRequest } from "@/lib/account-client";
+import { AccountControls } from "./account-controls";
 import { request } from "@/lib/client";
 import { FragranceSearch } from "./fragrance-search";
 import { DetailDialog, RecommendationCarousel } from "./recommendations";
@@ -15,7 +17,8 @@ import { Icon } from "./icons";
 import { PerfumePhoto } from "./perfume-photo";
 const EXAMPLE = [31861, 9099, 9828, 5521, 33519];
 export default function FragranceApp() {
-  const { collection, update, warning } = useCollection();
+  const account = useAccountCollection();
+  const { collection, update, warning } = account;
   const [result, setResult] = useState<{
     key: string;
     rows: RecommendationRow[];
@@ -27,7 +30,7 @@ export default function FragranceApp() {
   const [detail, setDetail] = useState<Recommendation | null>(null);
   const pending = useRef<AbortController | null>(null);
   const resultArea = useRef<HTMLDivElement>(null);
-  const collectionKey = `${collection
+  const collectionKey = `${account.user?.id || "guest"}:${account.items.map((i) => `${i.perfume_id}:${i.status}:${i.personal_rating}`).join(";")}:${collection
     .map((item) => item.id)
     .sort((a, b) => a - b)
     .join(",")}:${includeClones}`;
@@ -82,19 +85,22 @@ export default function FragranceApp() {
     setError("");
     setResult(null);
     try {
-      const data = await request<{ rows: RecommendationRow[] }>(
-        "/api/recommend",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            owned_ids: collection.map((item) => item.id),
-            filters: { include_clones: includeClones },
-            limit: 12,
-          }),
-        },
-      );
+      const data = await (
+        account.user
+          ? accountRequest<{ rows: RecommendationRow[] }>
+          : request<{ rows: RecommendationRow[] }>
+      )(account.user ? "recommend" : "/api/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          ...(account.user
+            ? {}
+            : { owned_ids: collection.map((item) => item.id) }),
+          filters: { include_clones: includeClones },
+          limit: 12,
+        }),
+      });
       if (!controller.signal.aborted && currentKey.current === key) {
         setResult({ key, rows: data.rows });
         requestAnimationFrame(() =>
@@ -118,6 +124,24 @@ export default function FragranceApp() {
       if (!controller.signal.aborted) setLoading(false);
     }
   }
+  useEffect(() => {
+    if (
+      account.ready &&
+      account.user &&
+      !account.busy &&
+      collection.length >= 5
+    ) {
+      let active = true;
+      queueMicrotask(() => {
+        if (active) void discover();
+      });
+      return () => {
+        active = false;
+      };
+    }
+    // Refresh matches when the persisted collection or personal ratings change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.ready, account.user?.id, account.busy, collectionKey]);
   return (
     <>
       <a href="#collection" className="skip-link">
@@ -141,6 +165,14 @@ export default function FragranceApp() {
           Your collection{" "}
           <span className="count-badge">{collection.length}</span>
         </a>
+        <AccountControls
+          user={account.user}
+          collection={collection}
+          ready={account.ready}
+          refresh={account.refresh}
+          logout={account.logout}
+          locked={account.busy || !account.ready}
+        />
       </header>
       <main>
         <section className="hero">
@@ -189,136 +221,224 @@ export default function FragranceApp() {
                 <small> / 05 min.</small>
               </span>
             </div>
-            <FragranceSearch
-              owned={collection}
-              add={(perfume) => change([...collection, perfume])}
-            />
-            {collection.length ? (
-              <>
-                <ul
-                  className="collection-list"
-                  aria-label="Your fragrance collection"
-                >
-                  {collection.map((perfume, index) => (
-                    <li key={perfume.id}>
-                      <span className="collection-index">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <PerfumePhoto perfume={perfume} variant="thumb" />
-                      <div>
-                        <small>{perfume.brand}</small>
+            <fieldset
+              disabled={!account.ready || account.busy}
+              className="collection-fieldset"
+            >
+              <FragranceSearch
+                owned={collection}
+                add={(perfume) => change([...collection, perfume])}
+              />
+              {collection.length ? (
+                <>
+                  <ul
+                    className="collection-list"
+                    aria-label="Your fragrance collection"
+                  >
+                    {collection.map((perfume, index) => (
+                      <li key={perfume.id}>
+                        <span className="collection-index">
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <PerfumePhoto perfume={perfume} variant="thumb" />
+                        <div>
+                          <small>{perfume.brand}</small>
+                          <button
+                            className="collection-name"
+                            aria-label={`View details for ${perfume.brand} ${perfume.name}`}
+                            onClick={() =>
+                              setDetail({
+                                ...perfume,
+                                because_of: perfume.id,
+                                shared_notes: [],
+                                shared_accords: [],
+                                best_offer: null,
+                              })
+                            }
+                          >
+                            {perfume.name}
+                          </button>
+                        </div>
+                        {account.user && (
+                          <label className="personal-rating">
+                            <span className="sr-only">
+                              Your rating for {perfume.name}
+                            </span>
+                            <select
+                              aria-label={`Your rating for ${perfume.name}`}
+                              value={
+                                account.items.find(
+                                  (i) => i.perfume_id === perfume.id,
+                                )?.personal_rating || ""
+                              }
+                              onChange={(e) =>
+                                account.save(
+                                  perfume,
+                                  "owned",
+                                  e.target.value
+                                    ? Number(e.target.value)
+                                    : null,
+                                )
+                              }
+                            >
+                              <option value="">Rate</option>
+                              {[1, 2, 3, 4, 5].map((n) => (
+                                <option key={n} value={n}>
+                                  {n} ★
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         <button
-                          className="collection-name"
-                          aria-label={`View details for ${perfume.brand} ${perfume.name}`}
+                          className="icon-button remove-button"
+                          aria-label={`Remove ${perfume.brand} ${perfume.name}`}
                           onClick={() =>
-                            setDetail({
-                              ...perfume,
-                              because_of: perfume.id,
-                              shared_notes: [],
-                              shared_accords: [],
-                              best_offer: null,
-                            })
+                            change(
+                              collection.filter(
+                                (item) => item.id !== perfume.id,
+                              ),
+                            )
                           }
                         >
-                          {perfume.name}
+                          <Icon name="close" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="storage-note">
+                    <Icon name="check" />
+                    {account.user
+                      ? account.busy
+                        ? "Saving to your account…"
+                        : "Saved to your account"
+                      : warning
+                        ? "Saved for this visit"
+                        : "Saved in this browser"}
+                  </p>
+                </>
+              ) : (
+                <div className="collection-empty">
+                  <div className="empty-symbol" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <p>
+                    A little of your taste.
+                    <br />A world of possibilities.
+                  </p>
+                  <small>Add at least 5 fragrances to get started.</small>
+                </div>
+              )}
+              {warning && (
+                <p className="fine-print" role="status">
+                  {warning}
+                </p>
+              )}
+              <div className="collection-bottom">
+                <div
+                  className="progress-track"
+                  role="progressbar"
+                  aria-label="Fragrances added toward five minimum"
+                  aria-valuemin={0}
+                  aria-valuemax={5}
+                  aria-valuenow={Math.min(5, collection.length)}
+                >
+                  <span
+                    style={{
+                      width: `${Math.min(100, collection.length * 20)}%`,
+                    }}
+                  />
+                </div>
+                <p className="progress-copy" aria-live="polite">
+                  {collection.length >= 5
+                    ? "Your collection is ready to explore."
+                    : `${5 - collection.length} more fragrance${5 - collection.length === 1 ? "" : "s"} to start discovering.`}
+                </p>
+                <label className="clone-toggle">
+                  <input
+                    type="checkbox"
+                    checked={includeClones}
+                    onChange={(event) => {
+                      pending.current?.abort();
+                      setLoading(false);
+                      setError("");
+                      setIncludeClones(event.target.checked);
+                    }}
+                  />
+                  <span>Include clone fragrances</span>
+                </label>
+                <button
+                  className="primary-button"
+                  onClick={discover}
+                  disabled={
+                    collection.length < 5 ||
+                    loading ||
+                    exampleLoading ||
+                    !account.ready ||
+                    account.busy
+                  }
+                >
+                  {loading
+                    ? "Finding your next favorites…"
+                    : "Discover my matches"}
+                  {!loading && <Icon name="arrow" />}
+                </button>
+                {collection.length === 0 && (
+                  <button
+                    className="example-button"
+                    onClick={example}
+                    disabled={exampleLoading}
+                  >
+                    {exampleLoading
+                      ? "Opening the example…"
+                      : "Just exploring? Try an example collection"}
+                  </button>
+                )}
+                {error && (
+                  <p className="error" role="alert">
+                    {error}
+                  </p>
+                )}
+              </div>
+            </fieldset>
+            {account.error && (
+              <p className="error" role="alert">
+                {account.error}{" "}
+                <button onClick={() => account.refresh()}>
+                  Retry account sync
+                </button>
+              </p>
+            )}
+            {account.user &&
+              account.items.some((item) => item.status !== "owned") && (
+                <div className="saved-shelf">
+                  <h3>Your saved fragrances</h3>
+                  {account.items
+                    .filter((item) => item.status !== "owned")
+                    .map((item) => (
+                      <div className="saved-item" key={item.perfume_id}>
+                        <PerfumePhoto perfume={item.perfume} variant="thumb" />
+                        <span>
+                          <small>
+                            {item.status === "wishlist"
+                              ? "Wishlist"
+                              : "Disliked"}{" "}
+                            · {item.perfume.brand}
+                          </small>
+                          <strong>{item.perfume.name}</strong>
+                        </span>
+                        <button
+                          onClick={() => account.save(item.perfume, "owned")}
+                          disabled={account.busy}
+                        >
+                          Mark owned
                         </button>
                       </div>
-                      <button
-                        className="icon-button remove-button"
-                        aria-label={`Remove ${perfume.brand} ${perfume.name}`}
-                        onClick={() =>
-                          change(
-                            collection.filter((item) => item.id !== perfume.id),
-                          )
-                        }
-                      >
-                        <Icon name="close" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <p className="storage-note">
-                  <Icon name="check" />
-                  {warning ? "Saved for this visit" : "Saved in this browser"}
-                </p>
-              </>
-            ) : (
-              <div className="collection-empty">
-                <div className="empty-symbol" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
+                    ))}
                 </div>
-                <p>
-                  A little of your taste.
-                  <br />A world of possibilities.
-                </p>
-                <small>Add at least 5 fragrances to get started.</small>
-              </div>
-            )}
-            {warning && (
-              <p className="fine-print" role="status">
-                {warning}
-              </p>
-            )}
-            <div className="collection-bottom">
-              <div
-                className="progress-track"
-                role="progressbar"
-                aria-label="Fragrances added toward five minimum"
-                aria-valuemin={0}
-                aria-valuemax={5}
-                aria-valuenow={Math.min(5, collection.length)}
-              >
-                <span
-                  style={{ width: `${Math.min(100, collection.length * 20)}%` }}
-                />
-              </div>
-              <p className="progress-copy" aria-live="polite">
-                {collection.length >= 5
-                  ? "Your collection is ready to explore."
-                  : `${5 - collection.length} more fragrance${5 - collection.length === 1 ? "" : "s"} to start discovering.`}
-              </p>
-              <label className="clone-toggle">
-                <input
-                  type="checkbox"
-                  checked={includeClones}
-                  onChange={(event) => {
-                    pending.current?.abort();
-                    setLoading(false);
-                    setError("");
-                    setIncludeClones(event.target.checked);
-                  }}
-                />
-                <span>Include clone fragrances</span>
-              </label>
-              <button
-                className="primary-button"
-                onClick={discover}
-                disabled={collection.length < 5 || loading || exampleLoading}
-              >
-                {loading
-                  ? "Finding your next favorites…"
-                  : "Discover my matches"}
-                {!loading && <Icon name="arrow" />}
-              </button>
-              {collection.length === 0 && (
-                <button
-                  className="example-button"
-                  onClick={example}
-                  disabled={exampleLoading}
-                >
-                  {exampleLoading
-                    ? "Opening the example…"
-                    : "Just exploring? Try an example collection"}
-                </button>
               )}
-              {error && (
-                <p className="error" role="alert">
-                  {error}
-                </p>
-              )}
-            </div>
           </section>
         </section>
         <section
@@ -426,6 +546,37 @@ export default function FragranceApp() {
           key={detail.id}
           perfume={detail}
           close={() => setDetail(null)}
+          actions={
+            account.user ? (
+              <div className="detail-account-actions">
+                {(["owned", "wishlist", "disliked"] as const).map((status) => (
+                  <button
+                    className="secondary-button"
+                    key={status}
+                    disabled={
+                      account.busy ||
+                      account.items.some(
+                        (i) =>
+                          i.perfume_id === detail.id && i.status === status,
+                      )
+                    }
+                    onClick={() => account.save(detail, status)}
+                  >
+                    {status === "owned"
+                      ? "Add to collection"
+                      : status === "wishlist"
+                        ? "Save to wishlist"
+                        : "Dislike"}
+                  </button>
+                ))}
+                {account.error && (
+                  <p className="error" role="alert">
+                    {account.error}
+                  </p>
+                )}
+              </div>
+            ) : undefined
+          }
         />
       )}
     </>

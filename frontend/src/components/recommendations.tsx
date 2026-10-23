@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import type {
   Perfume,
@@ -212,9 +212,11 @@ export function RecommendationCarousel({
 export function DetailDialog({
   perfume,
   close,
+  actions,
 }: {
   perfume: Recommendation;
   close: () => void;
+  actions?: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [detail, setDetail] = useState<PerfumeDetail | null>(null);
@@ -354,6 +356,7 @@ export function DetailDialog({
           </>
         )}
         <BuyLink item={data} />
+        {actions}
         {data.best_offer && (
           <p className="fine-print">
             Observed Amazon listing price. Shipping and tax excluded; price may

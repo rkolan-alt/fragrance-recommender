@@ -317,6 +317,27 @@ def test_google_login_binds_state_to_browser(account_app, monkeypatch):
     assert c.cookies.get(SESSION_COOKIE)
     assert not c.cookies.get("fragrance_oauth_state")
 
+    # Website sign-in retains the session cookie and returns to the fixed app origin.
+    authorize = c.get("/auth/google/authorize?web=true")
+    state = parse_qs(urlparse(authorize.json()["authorization_url"]).query)["state"][0]
+    response = c.get(
+        "/auth/google/callback", params={"code": "code", "state": state}, follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == settings.frontend_origin + "/?signed_in=1"
+    assert c.cookies.get(SESSION_COOKIE)
+    assert not c.cookies.get("fragrance_oauth_web")
+
+    # Invalid website callbacks return a retryable app screen and consume state.
+    c.get("/auth/google/authorize?web=true")
+    failed = c.get(
+        "/auth/google/callback", params={"code": "code", "state": "wrong"}, follow_redirects=False
+    )
+    assert failed.status_code == 303
+    assert failed.headers["location"] == settings.frontend_origin + "/?auth_error=google"
+    assert not c.cookies.get("fragrance_oauth_state")
+    assert not c.cookies.get("fragrance_oauth_web")
+
     async def second_identity(*args, **kwargs):
         return "google-id-2", "linked@example.com"
 
@@ -335,3 +356,29 @@ def test_csrf_errors_keep_cors_headers(account_app):
     response = c.post("/auth/register", json={}, headers={"Origin": settings.frontend_origin})
     assert response.status_code == 403
     assert response.headers["access-control-allow-origin"] == settings.frontend_origin
+
+
+def test_collection_contains_catalog_metadata_and_preserves_account_edits(account_app):
+    app, _ = account_app
+    c = client(app)
+    register(c)
+    login(c)
+    seed(c)
+    c.patch("/me/collection/1", json={"status": "wishlist", "personal_rating": 4})
+    seed(c)
+    items = c.get("/me/collection").json()
+    assert len(items) == 5
+    saved = next(item for item in items if item["perfume_id"] == 1)
+    assert saved["status"] == "wishlist"
+    assert saved["personal_rating"] == 4
+    assert saved["perfume"]["id"] == 1
+    assert isinstance(saved["perfume"]["name"], str)
+    assert isinstance(saved["perfume"]["brand"], str)
+    assert "image_url" in saved["perfume"]
+
+
+def test_public_auth_options_never_expose_credentials(account_app):
+    app, _ = account_app
+    response = TestClient(app).get("/auth/options")
+    assert response.status_code == 200
+    assert set(response.json()) == {"google_enabled", "frontend_origin"}

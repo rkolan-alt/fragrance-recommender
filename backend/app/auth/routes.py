@@ -16,6 +16,18 @@ from app.auth.users import (
 from app.config import settings
 
 router = APIRouter()
+
+
+@router.get("/auth/options")
+def options():
+    return {
+        "google_enabled": bool(
+            settings.google_oauth_client_id and settings.google_oauth_client_secret
+        ),
+        "frontend_origin": settings.frontend_origin,
+    }
+
+
 router.include_router(fastapi_users.get_register_router(UserRead, UserCreate), prefix="/auth")
 router.include_router(fastapi_users.get_auth_router(backend), prefix="/auth")
 router.include_router(fastapi_users.get_reset_password_router(), prefix="/auth")
@@ -90,7 +102,15 @@ def google_routes():
         return {"authorization_url": url}
 
     @router.get("/auth/google/authorize")
-    async def authorize(response: Response):
+    async def authorize(response: Response, web: bool = False):
+        response.set_cookie(
+            "fragrance_oauth_web",
+            "1" if web else "0",
+            max_age=600,
+            httponly=True,
+            secure=settings.cookie_secure,
+            samesite="lax",
+        )
         return await authorization(response, settings.google_oauth_redirect_url, {})
 
     @router.get("/auth/google/associate/authorize")

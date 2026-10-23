@@ -7,7 +7,7 @@ from limits import parse
 from limits.storage import storage_from_string
 from limits.strategies import MovingWindowRateLimiter
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from app.auth.users import SESSION_COOKIE
 from app.config import settings
@@ -41,9 +41,23 @@ class AccountSecurityMiddleware(BaseHTTPMiddleware):
             ):
                 return JSONResponse({"detail": "Invalid CSRF token or origin"}, status_code=403)
         response = await call_next(request)
+        if (
+            path == "/auth/google/callback"
+            and request.cookies.get("fragrance_oauth_web") == "1"
+            and response.status_code >= 400
+        ):
+            response = RedirectResponse(
+                settings.frontend_origin + "/?auth_error=google", status_code=303
+            )
         if account or private_recommend:
             response.headers["Cache-Control"] = "no-store"
         if path in {"/auth/google/callback", "/auth/google/associate/callback"}:
+            response.delete_cookie(
+                "fragrance_oauth_web",
+                secure=settings.cookie_secure,
+                httponly=True,
+                samesite="lax",
+            )
             response.delete_cookie(
                 "fragrance_oauth_state",
                 secure=settings.cookie_secure,

@@ -89,12 +89,28 @@ async def commit(session):
 
 @router.get("/collection")
 async def collection(user=Depends(current_user), session=Depends(get_session)):  # noqa: B008
-    items = await session.scalars(
-        select(CollectionItem)
-        .where(CollectionItem.user_id == user.id)
-        .order_by(CollectionItem.added_at)
+    items = list(
+        await session.scalars(
+            select(CollectionItem)
+            .where(CollectionItem.user_id == user.id)
+            .order_by(CollectionItem.added_at)
+        )
     )
-    return [item_json(i) for i in items]
+    from app.api.routes import get_catalog
+    from app.images import get_image_url
+
+    catalog = get_catalog()
+    rows = catalog.perfumes.iloc[catalog.rows([i.perfume_id for i in items])]
+    metadata = {
+        int(r.id): {
+            "id": int(r.id),
+            "name": r.name,
+            "brand": r.brand,
+            "image_url": get_image_url(int(r.id)),
+        }
+        for r in rows.itertuples()
+    }
+    return [{**item_json(i), "perfume": metadata[i.perfume_id]} for i in items]
 
 
 @router.post("/collection", status_code=201)

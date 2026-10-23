@@ -1426,3 +1426,136 @@ footer > span a {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+.account-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.account-email {
+  font-size: 12px;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-dialog {
+  width: min(500px, calc(100% - 32px));
+}
+.account-dialog h2 {
+  margin: 15px 0;
+}
+.account-form {
+  display: grid;
+  gap: 18px;
+  margin: 22px 0;
+}
+.account-form label {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  text-align: left;
+}
+.account-form input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #c9cdbf;
+  border-radius: 4px;
+  background: white;
+  color: #243222;
+}
+.account-form small {
+  color: #65735b;
+}
+.secondary-button {
+  padding: 11px 16px;
+  border: 1px solid #9ba58e;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.secondary-button:hover {
+  background: #edf0e5;
+}
+.account-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 12px;
+  text-decoration: underline;
+}
+.collection-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.collection-fieldset:disabled {
+  opacity: 0.65;
+}
+.personal-rating select {
+  max-width: 68px;
+  border: 1px solid #c9cdbf;
+  border-radius: 3px;
+  padding: 4px;
+  font-size: 12px;
+}
+.saved-shelf {
+  margin-top: 24px;
+  border-top: 1px solid #d6dacd;
+  padding-top: 18px;
+}
+.saved-shelf h3 {
+  font-size: 15px;
+  margin-bottom: 12px;
+}
+.saved-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.saved-item span {
+  flex: 1;
+  min-width: 0;
+}
+.saved-item small,
+.saved-item strong {
+  display: block;
+  font-size: 12px;
+}
+.saved-item button {
+  font-size: 12px;
+  text-decoration: underline;
+}
+.detail-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+.account-token {
+  max-width: 540px;
+  padding: 70px 24px;
+  margin: auto;
+}
+.account-token h1 {
+  font-size: 42px;
+}
+.account-token > a {
+  display: inline-block;
+  margin-top: 24px;
+  text-decoration: underline;
+}
+@media (max-width: 900px) {
+  .site-header {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .account-controls {
+    margin-left: auto;
+  }
+  .header-note {
+    display: none;
+  }
+}

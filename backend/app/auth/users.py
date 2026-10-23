@@ -67,6 +67,16 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_reset_password(self, user, request=None):
         await self.revoke_sessions(user)
 
+    async def on_after_login(self, user, request=None, response=None):
+        if (
+            request is not None
+            and response is not None
+            and request.url.path == "/auth/google/callback"
+            and request.cookies.get("fragrance_oauth_web") == "1"
+        ):
+            response.status_code = 303
+            response.headers["Location"] = settings.frontend_origin + "/?signed_in=1"
+
     async def on_after_update(self, user, update_dict, request=None):
         if "password" in update_dict or "email" in update_dict:
             await self.revoke_sessions(user)

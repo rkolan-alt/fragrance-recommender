@@ -20,10 +20,10 @@ Enter at least 5 fragrances you own and get carousels of recommendations: For Yo
 
 The offline data pipeline, feature vectors, clone exclusions, recommendation API,
 accounts backend, and Amazon pricing are implemented. The frontend now supports
-a guest collection builder, browser-local persistence, real recommendation
-carousels, clone inclusion, and fragrance detail dialogs. Account screens,
-account collection import, advanced filter controls, and public deployment are
-still to come.
+guest and account collections, email/password and Google sign-in, guest collection
+import, personal ratings, wishlist/disliked statuses, real recommendation carousels,
+clone inclusion, and fragrance details. Advanced filters, account settings and
+public deployment are still to come.
 
 After placing `perfumes.csv` and `perfumes.jsonl` in `data/raw/`, run
 `make process`, `make features`, and `make clones`. Run `make test` for backend
@@ -116,9 +116,9 @@ state and are cleared on changes; named custom rows use their saved filters.
 ### Email and Google configuration
 
 `EMAIL_BACKEND=outbox` writes development verification/reset links to the ignored
-`backend/mail-outbox/` directory. This makes the API testable before the frontend
-email-link pages exist. The frontend will read the token and call the matching
-API endpoint in Milestone 8. For real delivery, set `EMAIL_BACKEND=resend`,
+`backend/mail-outbox/` directory. Open the message’s link to use the website’s
+`/verify-email` or `/reset-password` page. No email is actually delivered in outbox
+mode. For real delivery, set `EMAIL_BACKEND=resend`,
 `RESEND_API_KEY`, and a verified `EMAIL_FROM`; outbox delivery is refused when
 secure production cookies are enabled.
 
@@ -133,8 +133,16 @@ Register the exact `GOOGLE_OAUTH_REDIRECT_URL` and the corresponding
 browser. Callbacks bind signed state to a browser cookie to prevent login CSRF.
 Email/password accounts are never automatically linked just because an email
 matches: verified, logged-in users explicitly connect Google using
-`/auth/google/associate/authorize`. Provider callbacks currently return the API
-response; the account UI and redirect experience arrive in Milestone 8.
+`/auth/google/associate/authorize` (account linking is currently API-only).
+The website requests `/auth/google/authorize?web=true`; successful callbacks
+retain the session cookie and redirect to the fixed `FRONTEND_ORIGIN`. Failures
+return to the sign-in screen. Direct API sign-in still returns its normal 204.
+For local Google login, frontend and callback must use the same hostname
+(`localhost`, on ports 3000 and 8001). The website carries the guest collection
+from `127.0.0.1` to the configured frontend origin before starting Google; the
+transfer contains only fragrance metadata and is removed from the URL immediately.
+Production must similarly keep the callback and website on one hostname through
+a reverse proxy, with HTTPS, secure cookies and matching Google redirect settings.
 
 Auth POST routes are limited to 10 requests per minute per client IP. The default
 in-memory limiter applies per process; configure shared storage before running
@@ -310,7 +318,14 @@ Open [the local website](http://127.0.0.1:3000). Keep using the same origin:
 `localhost` and `127.0.0.1` have separate browser storage. Search by fragrance or
 brand, select at least five distinct bottles, then choose **Discover my matches**.
 **Try an example collection** fetches five real catalog entries to get started.
-Collections persist in this browser; nothing is saved to an account in this UI yet.
+Guest collections persist in this browser. Choose **Sign in / Save collection**
+to create an account, use email/password, or continue with Google. Guest bottles
+are merged into the account without replacing existing statuses or ratings; browser
+data is cleared only after a successful import. Signed-in collection edits save
+to the database, and returning users with five owned bottles load matches automatically.
+Use personal ratings beside owned bottles, or open details to add to your collection,
+wishlist, or disliked list. Wishlist and disliked bottles do not count toward the
+five-owned-bottle minimum. Sign out hides account collection data.
 
 Recommendation rows support swipe, arrow buttons and keyboard navigation. Cards
 show ratings, accord profiles, an explanation, and Amazon offers only when
@@ -322,7 +337,10 @@ no longer match the current inputs. Search prevents duplicate entries.
 Browser requests use same-origin `/api/search`, `/api/recommend` and
 `/api/perfumes/<id>`. These narrow guest proxies connect to the FastAPI backend
 without forwarding login cookies, so an existing backend login does not change
-guest recommendation behavior. The default upstream is `http://127.0.0.1:8001`.
+guest recommendation behavior. Signed-in requests use the allowlisted
+`/api/account/*` proxy, which forwards only account cookies and CSRF headers,
+checks the browser origin for mutations, preserves upstream Set-Cookie headers,
+and disables caching. Credentials remain in httpOnly cookies. The default upstream is `http://127.0.0.1:8001`.
 To change it, set `FRAGRANCE_API_URL` in **frontend/.env.local**, then restart Next.
 The frontend does not load the backend's root `.env` or expose its credentials.
 
@@ -332,8 +350,10 @@ Turbopack worker-permission failure. No external font downloads are required.
 Manual browser checks cover real autocomplete, keyboard selection, duplicate
 prevention, the minimum of five, reload persistence, recommendation generation,
 card details, carousel controls, input-change invalidation, and desktop/mobile
-layouts without horizontal page overflow. Accounts and advanced filters remain
-separate upcoming work; this is the first usable guest experience.
+layouts without horizontal page overflow. Account browser checks use a separate
+temporary database: guest import, sign out/in, restored ratings and personalized
+recommendations. Google redirects and state binding use mocked provider tests.
+Advanced filtering and account settings are separate upcoming work.
 
 
 ### Bottle photos
