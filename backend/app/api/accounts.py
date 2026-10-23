@@ -3,16 +3,55 @@
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi_users import InvalidPasswordException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
+from starlette.concurrency import run_in_threadpool
 
-from app.auth.users import SESSION_COOKIE, current_user
+from app.auth.users import SESSION_COOKIE, UserUpdate, current_user, get_user_manager
+from app.config import settings
 from app.db.models import CollectionItem, Feedback, SavedFilter
 from app.db.session import get_session
 
 router = APIRouter(prefix="/me")
+
+
+class PasswordInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
+
+
+class DeleteInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmation_email: str = Field(max_length=320)
+    confirmation_text: Literal["DELETE"]
+
+
+@router.post("/password", status_code=204)
+async def change_password(
+    body: PasswordInput,
+    request: Request,
+    response: Response,
+    user=Depends(current_user),  # noqa: B008
+    manager=Depends(get_user_manager),  # noqa: B008
+):  # noqa: B008
+    valid, _ = await run_in_threadpool(
+        manager.password_helper.verify_and_update, body.current_password, user.hashed_password
+    )
+    if not valid:
+        raise HTTPException(400, "Current password is incorrect")
+    try:
+        await manager.update(
+            UserUpdate(password=body.new_password), user, safe=True, request=request
+        )
+    except InvalidPasswordException as exc:
+        raise HTTPException(400, exc.reason) from exc
+    response.delete_cookie(
+        SESSION_COOKIE, secure=settings.cookie_secure, httponly=True, samesite="lax"
+    )
 
 
 class ItemInput(BaseModel):
@@ -248,14 +287,19 @@ async def feedback(
 
 @router.delete("", status_code=204)
 async def delete_account(
+    body: DeleteInput,
     response: Response,
     user=Depends(current_user),  # noqa: B008
     session=Depends(get_session),  # noqa: B008
 ):  # noqa: B008
+    if body.confirmation_email.strip().casefold() != user.email.casefold():
+        raise HTTPException(400, "Enter your account email to confirm deletion")
     # Database foreign keys cascade collections, filters, feedback, OAuth and sessions.
     await session.delete(user)
     await commit(session)
-    response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(
+        SESSION_COOKIE, secure=settings.cookie_secure, httponly=True, samesite="lax"
+    )
 
 
 @router.get("/oauth")

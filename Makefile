@@ -1,6 +1,6 @@
 PY := backend/.venv/bin/python
 
-.PHONY: setup data process features images clones evaluate migrate prices validate-prices backend frontend test lint
+.PHONY: setup data process features images clones evaluate migrate prices validate-prices backend frontend test lint release-check artifacts
 
 setup:
 	python3 -m venv backend/.venv
@@ -20,7 +20,7 @@ clones:
 	cd backend && ../$(PY) -m pipeline.clones
 
 backend:
-	cd backend && .venv/bin/uvicorn app.main:app --reload --port 8001
+	cd backend && .venv/bin/uvicorn app.main:app --reload --port 8001 --no-access-log
 
 frontend:
 	cd frontend && npm run dev
@@ -46,3 +46,9 @@ validate-prices:
 
 images:
 	cd backend && ../$(PY) -m pipeline.images
+
+release-check:
+	cd backend && .venv/bin/python -m pipeline.release_check
+
+artifacts:
+	cd backend && .venv/bin/python -m pipeline.artifacts

@@ -1,10 +1,13 @@
 import asyncio
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.api import routes
 from app.auth.security import throttle
@@ -20,16 +23,24 @@ PASSWORD = "a-long-test-password"
 
 @pytest.fixture
 def account_app(tmp_path, monkeypatch):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'accounts.db'}")
+    postgres = os.environ.get("TEST_POSTGRES_URL")
+    if postgres and make_url(postgres).database != "fragrance_test":
+        raise RuntimeError("PostgreSQL tests require the disposable fragrance_test database")
+    engine = create_async_engine(
+        postgres or f"sqlite+aiosqlite:///{tmp_path / 'accounts.db'}", poolclass=NullPool
+    )
+    if not postgres:
 
-    @event.listens_for(engine.sync_engine, "connect")
-    def fk(connection, _):
-        connection.execute("PRAGMA foreign_keys=ON")
+        @event.listens_for(engine.sync_engine, "connect")
+        def fk(connection, _):
+            connection.execute("PRAGMA foreign_keys=ON")
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async def init():
         async with engine.begin() as conn:
+            if postgres:
+                await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
 
     asyncio.run(init())
@@ -232,7 +243,14 @@ def test_delete_account_cascades_all_private_data(account_app):
     seed(c)
     c.post("/me/feedback", json={"perfume_id": 6, "action": "clicked"})
     c.post("/me/filters", json={"name": "Test", "filter_json": {}})
-    assert c.delete("/me").status_code == 204
+    assert (
+        c.request(
+            "DELETE",
+            "/me",
+            json={"confirmation_email": "first@example.com", "confirmation_text": "DELETE"},
+        ).status_code
+        == 204
+    )
     assert c.get("/me/collection").status_code == 401
 
     async def empty():
@@ -248,7 +266,14 @@ def test_auth_rate_limit(account_app):
     c = client(app)
     for _ in range(10):
         c.post("/auth/login", data={"username": "nobody@example.com", "password": PASSWORD})
-    assert c.post("/auth/login", data={}).status_code == 429
+    assert (
+        c.post(
+            "/auth/login", data={"username": "nobody@example.com", "password": PASSWORD}
+        ).status_code
+        == 429
+    )
+    register(c, "different@example.com")
+    login(c, "different@example.com")
 
 
 def test_password_change_revokes_sessions_and_enforces_strength(account_app):
@@ -262,11 +287,71 @@ def test_password_change_revokes_sessions_and_enforces_strength(account_app):
     )
     register(c)
     login(c)
-    r = c.patch("/users/me", json={"password": "new-long-password"})
-    assert r.status_code == 200, r.text
+    assert c.patch("/users/me", json={"password": "new-long-password"}).status_code == 405
+    assert (
+        c.post(
+            "/me/password", json={"current_password": "wrong", "new_password": "new-long-password"}
+        ).status_code
+        == 400
+    )
+    assert c.get("/users/me").status_code == 200
+    assert (
+        c.post(
+            "/me/password", json={"current_password": PASSWORD, "new_password": "short"}
+        ).status_code
+        == 422
+    )
+    r = c.post(
+        "/me/password", json={"current_password": PASSWORD, "new_password": "new-long-password"}
+    )
+    assert r.status_code == 204, r.text
     assert c.get("/users/me").status_code == 401
     login(c, password="new-long-password")
     assert c.get("/me/oauth").json() == []
+
+
+def test_account_deletion_requires_explicit_matching_confirmation(account_app):
+    app, _ = account_app
+    c = client(app)
+    register(c)
+    login(c)
+    assert c.delete("/me").status_code == 422
+    assert (
+        c.request(
+            "DELETE",
+            "/me",
+            json={"confirmation_email": "other@example.com", "confirmation_text": "DELETE"},
+        ).status_code
+        == 400
+    )
+    assert c.get("/users/me").status_code == 200
+    assert (
+        c.request(
+            "DELETE",
+            "/me",
+            json={"confirmation_email": "first@example.com", "confirmation_text": "DELETE"},
+        ).status_code
+        == 204
+    )
+    assert c.get("/users/me").status_code == 401
+
+
+def test_registration_remains_usable_when_verification_delivery_fails(account_app, monkeypatch):
+    from app.auth import users
+    from app.auth.mail import MailDeliveryError
+
+    async def fail(*args):
+        raise MailDeliveryError("provider unavailable")
+
+    monkeypatch.setattr(users, "send_account_email", fail)
+    app, _ = account_app
+    c = client(app)
+    register(c)
+    login(c)
+    assert not c.get("/users/me").json()["is_verified"]
+    response = c.post("/auth/request-verify-token", json={"email": "first@example.com"})
+    assert response.status_code == 503
+    assert "provider unavailable" not in response.text
 
 
 def test_google_login_binds_state_to_browser(account_app, monkeypatch):
@@ -348,6 +433,61 @@ def test_google_login_binds_state_to_browser(account_app, monkeypatch):
     associated = c.get("/auth/google/associate/callback", params={"code": "code", "state": state})
     assert associated.status_code == 200, associated.text
     assert associated.json()["email"] == "google-user@example.com"
+
+    authorize = c.get("/auth/google/associate/authorize?web=true")
+    state = parse_qs(urlparse(authorize.json()["authorization_url"]).query)["state"][0]
+    linked = c.get(
+        "/auth/google/associate/callback",
+        params={"code": "code", "state": state},
+        follow_redirects=False,
+    )
+    assert linked.status_code == 303
+    assert linked.headers["location"] == settings.frontend_origin + "/?google_connected=1"
+    assert not c.cookies.get("fragrance_oauth_state")
+
+    other = client(oauth_app)
+    register(other, "second@example.com")
+    login(other, "second@example.com")
+    assert other.get("/auth/google/associate/authorize").status_code == 403
+    verification = token_from(mail("verify-email"))
+    assert other.post("/auth/verify", json={"token": verification}).status_code == 200
+    authorize = other.get("/auth/google/associate/authorize")
+    state = parse_qs(urlparse(authorize.json()["authorization_url"]).query)["state"][0]
+    conflict = other.get("/auth/google/associate/callback", params={"code": "code", "state": state})
+    assert conflict.status_code == 409
+
+
+def test_oauth_identity_uniqueness_is_enforced_in_database(account_app):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db.models import OAuthAccount
+
+    app, factory = account_app
+    c = client(app)
+    first = register(c)
+    second = register(c, "second@example.com")
+
+    async def check():
+        import uuid
+
+        async with factory() as session:
+            for user_id in (first["id"], second["id"]):
+                item = OAuthAccount(
+                    user_id=uuid.UUID(user_id),
+                    oauth_name="google",
+                    account_id="same-google-identity",
+                    account_email="test@example.com",
+                    access_token="test-only",
+                )
+                session.add(item)
+                if user_id == first["id"]:
+                    await session.commit()
+                else:
+                    with pytest.raises(IntegrityError):
+                        await session.commit()
+                    await session.rollback()
+
+    asyncio.run(check())
 
 
 def test_csrf_errors_keep_cors_headers(account_app):

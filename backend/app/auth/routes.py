@@ -34,7 +34,7 @@ router.include_router(fastapi_users.get_reset_password_router(), prefix="/auth")
 router.include_router(fastapi_users.get_verify_router(UserRead), prefix="/auth")
 users_router = fastapi_users.get_users_router(UserRead, UserUpdate)
 # Expose only self-service routes; no public admin/user-list surface.
-users_router.routes = [r for r in users_router.routes if r.path == "/me"]
+users_router.routes = [r for r in users_router.routes if r.path == "/me" and "GET" in r.methods]
 router.include_router(users_router, prefix="/users")
 
 
@@ -114,7 +114,21 @@ def google_routes():
         return await authorization(response, settings.google_oauth_redirect_url, {})
 
     @router.get("/auth/google/associate/authorize")
-    async def associate_authorize(response: Response, user=Depends(current_user)):  # noqa: B008
+    async def associate_authorize(
+        response: Response,
+        web: bool = False,
+        user=Depends(current_user),  # noqa: B008
+    ):  # noqa: B008
+        if not user.is_verified:
+            raise HTTPException(403, "Verify your email before connecting Google")
+        response.set_cookie(
+            "fragrance_oauth_web",
+            "1" if web else "0",
+            max_age=600,
+            httponly=True,
+            secure=settings.cookie_secure,
+            samesite="lax",
+        )
         return await authorization(response, association_redirect, {"sub": str(user.id)})
 
     return router

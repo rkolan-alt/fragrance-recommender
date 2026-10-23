@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Numeric,
     String,
     UniqueConstraint,
@@ -27,7 +28,7 @@ class Base(DeclarativeBase):
 
 
 class OAuthAccount(SQLAlchemyBaseOAuthAccountTableUUID, Base):
-    pass
+    __table_args__ = (Index("uq_oauth_provider_account", "oauth_name", "account_id", unique=True),)
 
 
 class User(SQLAlchemyBaseUserTableUUID, Base):

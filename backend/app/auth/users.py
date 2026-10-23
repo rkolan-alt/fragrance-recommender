@@ -1,7 +1,8 @@
+import logging
 import secrets
 import uuid
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from fastapi_users import (
     BaseUserManager,
     FastAPIUsers,
@@ -13,8 +14,9 @@ from fastapi_users.authentication import AuthenticationBackend, CookieTransport
 from fastapi_users.authentication.strategy.db import DatabaseStrategy
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyAccessTokenDatabase
 from sqlalchemy import delete
+from sqlalchemy.exc import IntegrityError
 
-from app.auth.mail import send_account_email
+from app.auth.mail import MailDeliveryError, send_account_email
 from app.config import settings
 from app.db.models import AccessToken, User
 from app.db.session import get_session, get_user_db
@@ -50,7 +52,14 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
     async def on_after_register(self, user, request=None):
         if not user.is_verified:
-            await self.request_verify(user, request)
+            try:
+                await self.request_verify(user, request)
+            except MailDeliveryError:
+                # The account is already committed. Return a usable signup;
+                # verification can be requested again after the provider recovers.
+                logging.getLogger("fragrance.requests").warning(
+                    '{"event":"registration_email_failed"}'
+                )
 
     async def on_after_request_verify(self, user, token, request=None):
         await send_account_email(user.email, token, "verify-email")
@@ -80,6 +89,39 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_update(self, user, update_dict, request=None):
         if "password" in update_dict or "email" in update_dict:
             await self.revoke_sessions(user)
+
+    async def oauth_associate_callback(
+        self,
+        user,
+        oauth_name,
+        access_token,
+        account_id,
+        account_email,
+        expires_at=None,
+        refresh_token=None,
+        request=None,
+    ):
+        existing = await self.user_db.get_by_oauth_account(oauth_name, account_id)
+        if existing is not None:
+            if existing.id != user.id:
+                raise HTTPException(
+                    409, "This Google account is already connected to another account"
+                )
+            return user
+        try:
+            return await super().oauth_associate_callback(
+                user,
+                oauth_name,
+                access_token,
+                account_id,
+                account_email,
+                expires_at,
+                refresh_token,
+                request,
+            )
+        except IntegrityError as exc:
+            await self.user_db.session.rollback()
+            raise HTTPException(409, "This Google account is already connected") from exc
 
 
 async def get_user_manager(user_db=Depends(get_user_db)):  # noqa: B008

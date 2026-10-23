@@ -22,8 +22,8 @@ The offline data pipeline, feature vectors, clone exclusions, recommendation API
 accounts backend, and Amazon pricing are implemented. The frontend now supports
 guest and account collections, email/password and Google sign-in, guest collection
 import, personal ratings, wishlist/disliked statuses, real recommendation carousels,
-clone inclusion, fragrance details, and custom filtering. Account settings and
-public deployment are still to come.
+clone inclusion, fragrance details, custom filtering, and account settings.
+Production readiness checks and CI are prepared; public deployment is still to come.
 
 After placing `perfumes.csv` and `perfumes.jsonl` in `data/raw/`, run
 `make process`, `make features`, and `make clones`. Run `make test` for backend
@@ -91,7 +91,9 @@ Routes (also visible at `/docs`):
   form fields `username` (email) and `password`; `POST /auth/logout` ends a session.
 - `POST /auth/request-verify-token`, `/auth/verify`, `/auth/forgot-password`,
   and `/auth/reset-password` handle email verification and password recovery.
-- `GET/PATCH /users/me` reads the account and updates email/password.
+- `GET /users/me` reads the account. `POST /me/password` verifies the current
+  password, changes it, and revokes every session. The old generic PATCH route
+  is disabled to prevent bypassing current-password verification.
 - `GET/POST /me/collection`, `PATCH/DELETE /me/collection/{perfume_id}` manage
   `owned`, `wishlist`, and `disliked` items and optional 1–5 personal ratings.
 - `POST /me/collection/import` accepts `{ "items": [{ "perfume_id": 31861 }] }`.
@@ -101,7 +103,8 @@ Routes (also visible at `/docs`):
   use `is_default` or `is_custom_row` to apply them on future visits.
 - `POST /me/feedback` accepts a perfume ID and `not_interested`, `clicked`, or `bought`.
 - `GET /me/oauth` lists connected providers without exposing provider tokens.
-- `DELETE /me` removes the account and cascades its collection, filters, feedback,
+- `DELETE /me` requires `confirmation_email` and `confirmation_text: "DELETE"`;
+  it removes the account and cascades its collection, filters, feedback,
   OAuth connections, and sessions.
 
 Signed-in `POST /recommend` takes `{}` or filters/category options; it reads
@@ -144,9 +147,11 @@ transfer contains only fragrance metadata and is removed from the URL immediatel
 Production must similarly keep the callback and website on one hostname through
 a reverse proxy, with HTTPS, secure cookies and matching Google redirect settings.
 
-Auth POST routes are limited to 10 requests per minute per client IP. The default
-in-memory limiter applies per process; configure shared storage before running
-multiple production workers, and use a trusted reverse-proxy configuration.
+Authentication requests are limited to 10 per minute per hashed account/session
+identity, plus a coarser 100-per-minute upstream-IP limit. This avoids locking
+out unrelated accounts behind the Next.js proxy. CSRF is checked before counting
+attempts. The default in-memory limiter applies per process; configure shared
+storage before running multiple production workers.
 Local integration tests exercise emails via the outbox and Google via mocked
 provider responses. Live Google/Resend delivery and a live PostgreSQL deployment
 require their credentials/services and have not been tested here.
@@ -353,7 +358,10 @@ card details, carousel controls, input-change invalidation, and desktop/mobile
 layouts without horizontal page overflow. Account browser checks use a separate
 temporary database: guest import, sign out/in, restored ratings and personalized
 recommendations. Google redirects and state binding use mocked provider tests.
-Account settings and public deployment are separate upcoming work.
+Account settings are available from the header. Password changes verify the current
+password and sign out all sessions. Verified users can connect Google to their
+existing account; provider identities are unique across accounts. Deletion requires
+typing the account email and DELETE. Public deployment is separate upcoming work.
 
 
 ### Bottle photos
@@ -443,3 +451,20 @@ tests cover vocabulary options, account isolation/persistence and intersections
 between global and custom filters. Browser checks use a temporary database and
 cover autocomplete, applying filters, URL reload persistence, and saving,
 restoring and removing a custom row.
+
+
+## Release preparation
+
+See [deployment/README.md](deployment/README.md) for production configuration,
+checks, and the remaining launch tasks. GitHub Actions now checks backend tests
+against SQLite and PostgreSQL, plus frontend tests, lint, and the production build.
+Run `make release-check` for read-only checks across six real collection types and
+36 filter combinations. It uses cached prices and makes no retailer API searches.
+Run `make artifacts` to package and checksum only the six processed catalog files;
+user databases, raw downloads and credentials are excluded.
+
+`/health` is a lightweight liveness check; `/health/ready` checks catalog loading
+and access to the migrated account database. Backend diagnostics use request IDs
+and structured status/timing logs without query strings, cookies, bodies or
+exception values. Run Uvicorn with `--no-access-log` (as in `make backend`) so its
+separate access logger does not record OAuth query parameters.

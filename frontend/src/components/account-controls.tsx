@@ -4,6 +4,7 @@ import type { Perfume } from "@/lib/types";
 import type { User } from "@/lib/account";
 import { accountRequest } from "@/lib/account-client";
 import { parseCollection } from "@/lib/collection";
+import { AccountSettings } from "./account-settings";
 
 async function google(collection: Perfume[]) {
   const options = await accountRequest<{
@@ -104,6 +105,20 @@ export function AccountControls({
       previous?.focus();
     };
   }, [open]);
+  useEffect(() => {
+    if (!ready || user) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("auth_error") === "google_link") {
+      url.searchParams.delete("auth_error");
+      window.history.replaceState(null, "", url);
+      queueMicrotask(() => {
+        setError(
+          "Sign in again, then open Account settings to reconnect Google.",
+        );
+        setOpen(true);
+      });
+    }
+  }, [ready, user]);
   async function action(work: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -123,6 +138,11 @@ export function AccountControls({
           <span className="account-email" title={user.email}>
             {user.email}
           </span>
+          <AccountSettings
+            user={user}
+            disabled={busy || locked}
+            sessionChanged={refresh}
+          />
           <button
             className="header-link"
             disabled={busy || locked}

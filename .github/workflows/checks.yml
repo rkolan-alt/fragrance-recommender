@@ -1,0 +1,56 @@
+name: Release checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        database: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: fragrance
+          POSTGRES_PASSWORD: disposable-test-password
+          POSTGRES_DB: fragrance_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fragrance -d fragrance_test"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: pip install -e 'backend[dev]'
+      - run: ruff check backend && ruff format --check backend
+      - run: pytest -q
+        working-directory: backend
+        env:
+          ENVIRONMENT: test
+          GOOGLE_OAUTH_CLIENT_ID: ''
+          GOOGLE_OAUTH_CLIENT_SECRET: ''
+          TEST_POSTGRES_URL: ${{ matrix.database == 'postgres' && 'postgresql+asyncpg://fragrance:disposable-test-password@localhost:5432/fragrance_test' || '' }}
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build

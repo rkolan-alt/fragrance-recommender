@@ -1798,3 +1798,58 @@ footer > span a {
     font-size: 28px;
   }
 }
+
+.settings-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.settings-fields section {
+  border-top: 1px solid #d7dbd0;
+  margin-top: 24px;
+  padding-top: 20px;
+}
+.settings-fields h3 {
+  font-size: 17px;
+  margin: 0 0 12px;
+}
+.settings-email {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.settings-email small {
+  display: block;
+  color: #65735b;
+  font-size: 11px;
+  margin-top: 6px;
+}
+.settings-notice:not(:empty) {
+  position: sticky;
+  top: 0;
+  background: #fafbf6;
+  border: 1px solid #c9cdbf;
+  padding: 10px;
+  z-index: 4;
+}
+.settings-link {
+  font-size: 12px;
+  text-decoration: underline;
+}
+.connected-providers {
+  list-style: none;
+  padding: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.danger-button {
+  border: 1px solid #a54c43;
+  background: #a54c43;
+  color: white;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.delete-account h3 {
+  color: #8c3b33;
+}

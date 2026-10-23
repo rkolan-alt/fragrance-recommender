@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 export const metadata: Metadata = {
+  referrer: "no-referrer",
   title: "Fragrance Recommender — Your next scent",
   description:
     "Discover fragrances through the collection you already love. Personalized recommendations by notes, accords, seasons, and community ratings.",

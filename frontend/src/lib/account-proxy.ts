@@ -1,4 +1,5 @@
 import "server-only";
+import { validMutationOrigin, returnLocation } from "./proxy-policy";
 
 const base = (process.env.FRAGRANCE_API_URL || "http://127.0.0.1:8001").replace(
   /\/$/,
@@ -15,7 +16,13 @@ const allowed: Record<string, string[]> = {
   "auth/request-verify-token": ["POST"],
   "auth/verify": ["POST"],
   "auth/google/authorize": ["GET"],
+  "auth/google/associate/authorize": ["GET"],
+  "auth/google/callback": ["GET"],
+  "auth/google/associate/callback": ["GET"],
   "users/me": ["GET"],
+  "me/oauth": ["GET"],
+  "me/password": ["POST"],
+  me: ["DELETE"],
   "me/collection": ["GET", "POST"],
   "me/collection/import": ["POST"],
   "me/filters": ["GET", "POST"],
@@ -34,17 +41,13 @@ export async function accountProxy(request: Request, path: string) {
     return Response.json({ detail: "Not found" }, { status: 404 });
   if (request.method !== "GET") {
     const origin = request.headers.get("origin");
-    const target = new URL(request.url);
     // Check the browser's origin before forwarding a credentialed mutation.
-    let valid = false;
-    try {
-      valid =
-        !!origin &&
-        new URL(origin).host === request.headers.get("host") &&
-        new URL(origin).protocol === target.protocol;
-    } catch {
-      /* Invalid origins are rejected. */
-    }
+    const valid = validMutationOrigin(
+      origin,
+      request.url,
+      request.headers.get("host"),
+      process.env.FRAGRANCE_PUBLIC_ORIGIN,
+    );
     if (!valid)
       return Response.json(
         { detail: "Invalid request origin" },
@@ -63,7 +66,14 @@ export async function accountProxy(request: Request, path: string) {
         /^\s*fragrance_(session|csrf|oauth_state|oauth_web)=/.test(part),
       );
     if (cookies.length) headers.set("cookie", cookies.join(";"));
-    const query = path === "auth/google/authorize" ? "?web=true" : "";
+    const callback =
+      path === "auth/google/callback" ||
+      path === "auth/google/associate/callback";
+    const query = callback
+      ? new URL(request.url).search
+      : path.endsWith("/authorize")
+        ? "?web=true"
+        : "";
     const upstream = await fetch(`${base}/${path}${query}`, {
       method: request.method,
       headers,
@@ -73,6 +83,23 @@ export async function accountProxy(request: Request, path: string) {
       signal: AbortSignal.timeout(30_000),
     });
     const output = new Headers({ "Cache-Control": "no-store" });
+    const location = upstream.headers.get("location");
+    if (location) {
+      const destination = returnLocation(
+        location,
+        request.url,
+        request.headers.get("host"),
+        process.env.FRAGRANCE_PUBLIC_ORIGIN,
+      );
+      if (!callback || !destination)
+        return Response.json(
+          { detail: "Invalid sign-in return address" },
+          { status: 502 },
+        );
+      output.set("location", destination);
+    }
+    const requestId = upstream.headers.get("x-request-id");
+    if (requestId) output.set("x-request-id", requestId);
     const contentType = upstream.headers.get("content-type");
     if (contentType) output.set("content-type", contentType);
     for (const cookie of upstream.headers.getSetCookie())
