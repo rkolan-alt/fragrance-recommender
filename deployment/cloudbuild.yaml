@@ -1,0 +1,14 @@
+# Build only; intentionally does not deploy services or run migrations.
+# Submit from the repository root after `make release-check && make artifacts`.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: [build, -f, deployment/backend.Dockerfile, -t, '${_REGION}-docker.pkg.dev/$PROJECT_ID/fragrance/backend:${_TAG}', .]
+  - name: gcr.io/cloud-builders/docker
+    args: [build, -f, deployment/frontend.Dockerfile, -t, '${_REGION}-docker.pkg.dev/$PROJECT_ID/fragrance/frontend:${_TAG}', .]
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/fragrance/backend:${_TAG}'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/fragrance/frontend:${_TAG}'
+substitutions:
+  _REGION: us-central1
+  _TAG: candidate
+timeout: 1800s

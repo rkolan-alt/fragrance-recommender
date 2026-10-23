@@ -1,0 +1,5 @@
+# Keep Cloud Build uploads identical to the Docker build allowlist.
+#!include:.dockerignore
+!.dockerignore
+!.gcloudignore
+!deployment/cloudbuild.yaml

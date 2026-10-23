@@ -1,5 +1,8 @@
 # Before deployment
 
+For Cloud Run containers, build configuration and the staged release procedure,
+see [GCP.md](GCP.md). Deployment is manual; pushes only run release checks.
+
 The product remains local. These changes do not create GCP resources, spend cloud
 credits, send real email, rotate credentials, or publish data.
 

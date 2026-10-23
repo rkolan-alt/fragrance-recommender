@@ -29,3 +29,6 @@ out/
 
 # Local account verification/reset emails
 backend/mail-outbox/
+
+# Private cloud runtime configuration (never commit secrets or generated env files)
+deployment/local/
